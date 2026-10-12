@@ -1,19 +1,24 @@
 # 宝石花园 · Gem Garden
 
-无需构建或安装依赖的宝石贴画小游戏。使用原生 HTML、CSS、JavaScript 和 SVG 绘制原创切面宝石，适配手机、平板与电脑。
+纯前端宝石贴画小游戏。游戏源文件和单文件版统一放在 `frontend/` 目录中。
+
+## 目录
+
+- `frontend/index.html`：游戏页面
+- `frontend/style.css`：样式
+- `frontend/app.js`：游戏逻辑
+- `frontend/gem-garden.html`：可直接打开的单文件版
+- `frontend/README.md`：玩法与运行说明
 
 ## 本地运行
 
-在仓库目录执行：
-
 ```sh
+cd frontend
 python3 -m http.server 8000 --bind 0.0.0.0
 ```
 
-浏览器打开服务器的 8000 端口。也可部署至任何静态网站服务。
+也可双击 `frontend/gem-garden.html` 打开游戏。
 
-## 玩法
+## GitHub Pages
 
-选择顶部宝石，点击相同编号的凹槽。点击模式逐颗放置；连贴模式按住拖动，可连续放置当前颜色；移动模式拖动画布。使用缩放按钮或鼠标滚轮放大细节，点击“适应画布”恢复视图。
-
-提供翡翠花冠、春日枝语、繁星花海三种原创图案。每幅画自动保存进度至当前浏览器 localStorage；清除浏览器数据会移除存档。支持撤销当前会话的贴放、重置及可选音效。不依赖账号、后端或外部素材。
+继续使用 `main` 分支的根目录发布。根目录的 `index.html` 会转到 `frontend/`，原来的站点入口仍可使用。
