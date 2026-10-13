@@ -6,11 +6,12 @@
 
 - `frontend/index.html`：游戏页面
 - `frontend/style.css`：样式
-- `frontend/app.js`：游戏逻辑和四幅贴画
-- `frontend/assets/`：本地写实宝石图集及来源说明
+- `frontend/app.js`：缓存绘制、手势和游戏逻辑
+- `frontend/assets/`：写实宝石图集、共享主体轮廓与固定排布
 - `frontend/gem-garden.html`：含素材的单文件版，可直接打开
 - `frontend/README.md`：玩法、开发与测试说明
 - `scripts/bundle.py`：生成单文件版
+- `scripts/layouts.py`：按主体几何生成排布并检查间距（开发工具需要 Pillow）
 - `tests/smoke.cjs`：浏览器功能与触摸回归检查
 
 ## 本地运行
@@ -27,3 +28,5 @@ python3 -m http.server 8000 --bind 0.0.0.0
 ## GitHub Pages
 
 使用 `main` 分支的根目录发布。根目录 `index.html` 会转到 `frontend/`，原来的站点入口仍可使用。
+
+四幅贴画已按大小填隙重新排布，并使用缓存 Canvas 绘制。新版使用独立存档，原有旧版存档保留；详细说明见 `frontend/README.md`。
