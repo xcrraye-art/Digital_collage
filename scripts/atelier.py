@@ -98,33 +98,6 @@ for x,y,h in [(269,596,35),(291,596,35),(490,603,17),(510,603,17)]:birds.add(x,y
 for i,(x,y,h) in enumerate([(250,190,16),(325,154,12),(402,169,37),(489,183,15),(550,225,23)]):birds.add(x,y,h,1,'heart',i*4-8)
 for x,y in [(216,245),(461,150),(581,283)]:birds.add(x,y,6.5,3)
 
-# Append refinements: keep every released slot and its save index unchanged.
-base_birds=len(birds.items)
-# Continue the head lattice through the neck instead of leaving a white seam.
-for cx,cy,body,head,c in [(314,302,left,lhead,4),(468,329,right,rhead,0)]:
-    union=lambda x,y,body=body,head=head:body(x,y) or head(x,y)
-    for row in range(4,10):
-        for col in range(-5,6):
-            x=cx+col*11.8+(row%2)*5.9;y=cy+row*10.6+1.8*(col/6)**2
-            birds.add(x,y,6.2,c,'round',0,union)
-# A regular fine-bead outline rounds the silhouette without random gap filling.
-for cx,cy,rx,ry,other,c in [(314,302,65,66,left,4),(286,430,102,139,lhead,4),(468,329,62,62,right,0),(502,452,102,137,rhead,0)]:
-    n=round(math.tau*math.sqrt((rx*rx+ry*ry)/2)/9.5)
-    region=lambda x,y,cx=cx,cy=cy,rx=rx,ry=ry:ellipse(x,y,cx,cy,rx,ry)
-    for i in range(n):
-        a=i*math.tau/n;x=cx+(rx-3)*math.cos(a);y=cy+(ry-3)*math.sin(a)
-        if not other(x,y):birds.add(x,y,4.4,c,'round',0,region)
-# Complete the paired feet, allowing room for the branch's own stones.
-birds.add(291,594,26,3,'leaf');birds.add(490,598,17,3,'leaf')
-for x,y,c in [(269,574,4),(291,574,4),(490,585,0),(510,588,0)]:birds.add(x,y,6,c)
-# New versions must preserve the prefix of every already released artwork.
-for board,ident in [(crown,'atelier-crown'),(birds,'atelier-birds')]:
-    previous=next((l for l in data['layouts'] if l['id']==ident),None)
-    if previous:
-        assert len(board.items)>=len(previous['items'])
-        for current,old in zip(board.items,previous['items']):
-            assert current=={k:v for k,v in old.items() if k!='gem'},f'Changed saved slot {ident}: {old["id"]}'
-
 for board in [crown,birds]:
     boxes=[(min(x for x,y in p),min(y for x,y in p),max(x for x,y in p),max(y for x,y in p)) for p in board.polys]
     for i,a in enumerate(board.polys):
@@ -136,7 +109,9 @@ for k,g in LIB.items():data['gems']['atelier-'+k]=g
 legacy=[l for l in data['layouts'] if l.get('edition')!='atelier']
 for id,name,tag,board in [('atelier-crown','翡翠花冕','珠宝花冠 · 对称花瓣与细金珠',crown),('atelier-birds','双鸟花枝','羽毛排布 · 细密水滴与心形',birds)]:
     for s in board.items:s['gem']='atelier-'+s['shape']+'-'+str(s['c'])
-    legacy.append({'id':id,'name':name,'tag':tag,'edition':'atelier','gap':GAP,'items':board.items})
+    layout={'id':id,'name':name,'tag':tag,'edition':'atelier','gap':GAP,'items':board.items}
+    if id=='atelier-birds':layout['retiredSlotCount']=515
+    legacy.append(layout)
     print(id,len(board.items),'slots, validated minimum gap',GAP)
 data['layouts']=legacy
 (FRONT/'assets/geometry.json').write_text(json.dumps(data,ensure_ascii=False,separators=(',',':'))+'\n')

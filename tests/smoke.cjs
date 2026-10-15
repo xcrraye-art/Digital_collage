@@ -21,20 +21,23 @@ const path=require('node:path');
   // Fine-cut editions use their exact smooth silhouette for palette, slots and hits.
   for(const art of [4,5]){
    await page.locator(`[data-art="${art}"]`).click();const s=await state(page);
-   assert.equal(s.items.length,art===4?181:515);assert.ok(s.items.every(g=>g.gem.startsWith('atelier-')));
+   assert.equal(s.items.length,art===4?181:397);assert.ok(s.items.every(g=>g.gem.startsWith('atelier-')));
    for(let type=0;type<s.types.length;type++){
     await page.locator(`[data-type="${type}"]`).click();await page.locator('#find').click();const located=await state(page);
     assert.equal(located.items[located.focusId].type,type);await clickGem(page,located.focusId);await waitFilled(page,type+1);
    }
-   const beforeReference=await state(page);
-   await page.locator('#reference-open').click();assert.equal(await page.locator('#reference').evaluate(e=>e.open),true);
-   assert.match(await page.locator('#reference-title').textContent(),/成品参考/);
-   assert.ok(await page.locator('#reference-canvas').evaluate(c=>c.getContext('2d').getImageData(0,0,c.width,c.height).data.some((v,i)=>i%4===3&&v>0)),'Reference contains artwork');
-   await page.keyboard.press('Escape');assert.equal(await page.locator('#reference').evaluate(e=>e.open),false);
-   assert.deepEqual(await state(page),beforeReference,'Reference preserves paint, selection, camera and undo state');
    await page.locator('#back').click();await page.locator(`[data-art="${art}"]`).click();await waitFilled(page,s.types.length);
    assert.equal(await page.locator('#undo').isDisabled(),true);await page.locator('#back').click();
   }
+  // Rolling back the decoration must keep original paint and archive hidden IDs.
+  await page.evaluate(()=>localStorage.setItem('gem-garden-v3-atelier-birds','[0,396,397,514]'));
+  await page.locator('[data-art="5"]').click();assert.deepEqual((await state(page)).filled,[0,396]);
+  await page.locator('#find').click();const restored=await state(page);await clickGem(page,restored.focusId);await waitFilled(page,3);
+  const archived=await page.evaluate(()=>JSON.parse(localStorage.getItem('gem-garden-v3-atelier-birds')));
+  assert.ok(archived.includes(397)&&archived.includes(514),'Hidden extension paint survives the next save');
+  page.once('dialog',d=>d.accept());await page.locator('#reset').click();await waitFilled(page,0);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('gem-garden-v3-atelier-birds')),'[]','Explicit reset also clears archived decoration');
+  await page.locator('#back').click();
   await page.evaluate(()=>localStorage.setItem('gem-garden-0',JSON.stringify([0,16])));
   await page.locator('[data-art="0"]').click();assert.equal((await state(page)).items.length,140);
   assert.equal((await state(page)).renderer,'canvas-cache');assert.equal((await state(page)).filled.length,0,'Old index save is not applied to a different layout');
@@ -107,9 +110,6 @@ const path=require('node:path');
   await page.unroute('**/assets/**');
   const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:2});const mobile=await ctx.newPage();mobile.on('pageerror',e=>errors.push(e.message));
   await mobile.goto(origin+'/frontend/');await mobile.locator('#classic-works summary').tap();await mobile.locator('[data-art="0"]').tap();await clickGem(mobile,0,true);await waitFilled(mobile,1);
-  const mobilePaint=await state(mobile);await mobile.locator('#reference-open').tap();
-  const refBox=await mobile.locator('#reference').boundingBox();assert.ok(refBox.x>=0&&refBox.x+refBox.width<=391);
-  await mobile.locator('#reference-close').tap();assert.deepEqual(await state(mobile),mobilePaint,'Mobile reference preserves progress');
   const cdp=await ctx.newCDPSession(mobile),pts=(x,y)=>[{x,y:490,id:1},{x:y,y:490,id:2}];
   const swipeStart=await screen(mobile,1),swipeEnd=await screen(mobile,2);
   await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...swipeStart,id:5}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{...swipeEnd,id:5}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
@@ -132,6 +132,6 @@ const path=require('node:path');
   await mobile.locator('#find').tap();const landscape=await state(mobile);assert.ok(landscape.focusId>=0);await clickGem(mobile,landscape.focusId,true);await waitFilled(mobile,1);
 
   assert.deepEqual(errors,[]);
-  console.log('PASS: reference dialog on desktop/mobile preserves complete game state; both fine-cut editions, all new shape/material hits and saves; background stroke/save cleanup; actual-progress thumbnails, final stroke segment, bounded/recovered camera; separate color/cut types, wrong-shape rejection, 11-type palette, long-press sampling, exact-type locator; target locator, remaining counts, anchored wheel zoom, touch swipe protection; all six layouts, cached renderer, precise hit testing, wrong-color rejection, undo, new/legacy saves, drag paint, completion, pan/zoom, standalone assets, mobile tap/pinch, DPR and no horizontal overflow.');
+  console.log('PASS: withdrawn-decoration saves preserved and explicit reset clears them; both fine-cut editions, all new shape/material hits and saves; background stroke/save cleanup; actual-progress thumbnails, final stroke segment, bounded/recovered camera; separate color/cut types, wrong-shape rejection, 11-type palette, long-press sampling, exact-type locator; target locator, remaining counts, anchored wheel zoom, touch swipe protection; all six layouts, cached renderer, precise hit testing, wrong-color rejection, undo, new/legacy saves, drag paint, completion, pan/zoom, standalone assets, mobile tap/pinch, DPR and no horizontal overflow.');
  }finally{if(browser)await browser.close();server.kill()}
 })().catch(e=>{console.error(e);process.exitCode=1});

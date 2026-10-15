@@ -6,7 +6,7 @@ const colors = [
   {name:'石榴石',dark:'#8f3b2c'}, {name:'黄水晶',dark:'#967a20'}, {name:'海蓝宝',dark:'#45748d'}
 ];
 const WORLD=800, CACHE_SCALE=2, SPRITE_SIZE=256, PAD=16, CELL=64;
-let data, materials, atlas, sprites=new Map(), layouts=[], current=0, items=[], filled=new Set(), history=[], activeStroke=[];
+let data, materials, atlas, sprites=new Map(), layouts=[], current=0, items=[], filled=new Set(), retiredFilled=new Set(), history=[], activeStroke=[];
 const shapeNames={round:"圆形",drop:"水滴形",leaf:"马眼形",heart:"心形"};
 let types=[],totals=[], done=[], selected=0, mode='tap', zoom=1, pan={x:0,y:0}, width=1,height=1,fit=1,dpr=1;
 let artworkBounds=null;
@@ -17,8 +17,10 @@ const hitContext=document.createElement('canvas').getContext('2d');
 
 function notify(message){$('toast').textContent=message;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2200)}
 function key(i=current){return `gem-garden-v3-${layouts[i].id}`}
-function saved(i){try{const raw=JSON.parse(localStorage.getItem(key(i))||'[]');return new Set(Array.isArray(raw)?raw.filter(n=>Number.isInteger(n)&&n>=0&&n<layouts[i].items.length):[])}catch{return new Set()}}
-function flushSave(){clearTimeout(saveTimer);if(!saveDirty)return;try{localStorage.setItem(key(),JSON.stringify([...filled]));saveDirty=false}catch{notify('无法保存进度，本次仍可继续游玩')}}
+// Preserve painted IDs from the withdrawn decorative extension in the same save.
+function stored(i){try{const raw=JSON.parse(localStorage.getItem(key(i))||'[]'),limit=layouts[i].retiredSlotCount||layouts[i].items.length;return new Set(Array.isArray(raw)?raw.filter(n=>Number.isInteger(n)&&n>=0&&n<limit):[])}catch{return new Set()}}
+function saved(i){return new Set([...stored(i)].filter(n=>n<layouts[i].items.length))}
+function flushSave(){clearTimeout(saveTimer);if(!saveDirty)return;try{localStorage.setItem(key(),JSON.stringify([...filled,...retiredFilled]));saveDirty=false}catch{notify('无法保存进度，本次仍可继续游玩')}}
 function deferSave(){saveDirty=true;clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,350)}
 function makeCanvas(w,h=w){const c=document.createElement('canvas');c.width=w;c.height=h;return c}
 function makePath(outline){
@@ -29,10 +31,7 @@ function makePath(outline){
 }
 const gemKey=s=>s.gem||`${s.shape}-${s.c}`;
 function prepareSprites(){
-  const used=new Set(layouts.flatMap(layout=>layout.types.map(t=>t.key)));
   for(const [id,g] of Object.entries(data.gems)){
-    if(!used.has(id))continue;
-    const materialColor=colors[Number(id.split('-').at(-1))].dark;
     const path=g.path?new Path2D(g.path):makePath(g.outline),size=SPRITE_SIZE+PAD*2;
     const mask=makeCanvas(size),mc=mask.getContext('2d');
     mc.translate(size/2,size/2);mc.scale(SPRITE_SIZE,SPRITE_SIZE);mc.fillStyle='#fff';mc.fill(path);
@@ -45,14 +44,14 @@ function prepareSprites(){
     sc.shadowColor='rgba(91,81,86,.27)';sc.shadowBlur=7;sc.globalAlpha=.7;sc.drawImage(inverse,2,3);sc.globalAlpha=1;
     const rim=makeCanvas(size),rc=rim.getContext('2d');rc.shadowColor='white';rc.shadowBlur=3;rc.drawImage(mask,0,1.5);
     const finalSocket=makeCanvas(size),fc=finalSocket.getContext('2d');fc.drawImage(rim,0,0);fc.drawImage(socket,0,0);
-    const socketActive=makeCanvas(size),ac=socketActive.getContext('2d');ac.drawImage(finalSocket,0,0);ac.translate(size/2,size/2);ac.scale(SPRITE_SIZE,SPRITE_SIZE);ac.fillStyle=materialColor+'10';ac.fill(path);ac.strokeStyle=materialColor+'55';ac.lineWidth=.003;ac.stroke(path);
+    const socketActive=makeCanvas(size),ac=socketActive.getContext('2d');ac.drawImage(finalSocket,0,0);ac.translate(size/2,size/2);ac.scale(SPRITE_SIZE,SPRITE_SIZE);ac.fillStyle='rgba(206,173,187,.08)';ac.fill(path);ac.strokeStyle='rgba(173,127,151,.24)';ac.lineWidth=.003;ac.stroke(path);
     sprites.set(id,{path,gem,socket:finalSocket,socketActive});
     for(const temporary of [mask,base,inverse,rim,socket])temporary.width=0;
   }
 }
 const glyphs=new Map();
 function typeName(id){const t=types[id];return `${colors[t.c].name} · ${shapeNames[t.shape]}`}
-function glyph(typeId,active,typeList=types){const t=typeList[typeId],id=`${t.key}-${typeId}-${active}`;if(glyphs.has(id))return glyphs.get(id);const c=makeCanvas(160),ctx=c.getContext('2d');ctx.font='92px Georgia';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=active?colors[t.c].dark:'#897d84';ctx.fillText(typeId+1,80,83);glyphs.set(id,c);return c}
+function glyph(typeId,active,typeList=types){const t=typeList[typeId],id=`${t.key}-${typeId}-${active}`;if(glyphs.has(id))return glyphs.get(id);const c=makeCanvas(160),ctx=c.getContext('2d');ctx.font='92px Georgia';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=active?colors[t.c].dark:'#a0999f';ctx.fillText(typeId+1,80,83);glyphs.set(id,c);return c}
 function drawGem(ctx,s,placed,highlight=true){ctx.save();ctx.translate(s.x,s.y);ctx.rotate(s.angle*Math.PI/180);const ratio=(SPRITE_SIZE+PAD*2)/SPRITE_SIZE;ctx.drawImage(sprites.get(gemKey(s))[placed?'gem':highlight&&s.type===selected?'socketActive':'socket'],-s.w*ratio/2,-s.h*ratio/2,s.w*ratio,s.h*ratio);ctx.restore()}
 function drawNumber(ctx,s,active=false,typeList=types){const font=Math.min(16,Math.max(3.4,s.w*.31)),size=font*160/92;ctx.drawImage(glyph(s.type,active,typeList),s.x-size/2,s.y-size/2,size,size)}
 function bounds(s){const a=s.angle*Math.PI/180,r=(SPRITE_SIZE+PAD*2)/SPRITE_SIZE;const w=(Math.abs(s.w*Math.cos(a))+Math.abs(s.h*Math.sin(a)))*r/2+2,h=(Math.abs(s.w*Math.sin(a))+Math.abs(s.h*Math.cos(a)))*r/2+2;return{x:s.x-w,y:s.y-h,w:w*2,h:h*2}}
@@ -115,18 +114,18 @@ function scrollSelected(){
 }
 function selectType(id){selected=id;focusId=-1;sceneDirty=true;uiDirty=true;requestDraw()}
 function updateUI(){
-  const pct=Math.round(filled.size/items.length*100);$('percent').textContent=pct+'%';$('count').textContent=`${filled.size} / ${items.length} 颗`;$('progress').style.width=pct+'%';$('undo').disabled=!history.length&&!activeStroke.length;$('zoom').textContent=Math.round(zoom*100)+'%';$('gem-name').textContent=typeName(selected);$('gem-name').style.color=colors[types[selected].c].dark;$('remaining').textContent=done[selected]===totals[selected]?'已完成':`剩余 ${totals[selected]-done[selected]} 颗`;$('find').disabled=filled.size===items.length;canvas.setAttribute('aria-label',`${layouts[current].name}，已贴 ${filled.size} / ${items.length} 颗`);
+  const pct=Math.round(filled.size/items.length*100);$('percent').textContent=pct+'%';$('count').textContent=`${filled.size} / ${items.length} 颗`;$('progress').style.width=pct+'%';$('undo').disabled=!history.length&&!activeStroke.length;$('zoom').textContent=Math.round(zoom*100)+'%';$('gem-name').textContent=typeName(selected);$('remaining').textContent=done[selected]===totals[selected]?'已完成':`剩余 ${totals[selected]-done[selected]} 颗`;$('find').disabled=filled.size===items.length;canvas.setAttribute('aria-label',`${layouts[current].name}，已贴 ${filled.size} / ${items.length} 颗`);
   $('palette').querySelectorAll('[data-type]').forEach(b=>{const t=Number(b.dataset.type);b.classList.toggle('active',t===selected);b.setAttribute('aria-pressed',t===selected);b.querySelector('span').textContent=done[t]===totals[t]?'✓':t+1;b.querySelector('small').textContent=done[t]===totals[t]?'完成':`余 ${totals[t]-done[t]}`;b.title=`${t+1}号 ${typeName(t)} · 剩余 ${totals[t]-done[t]} 颗`});
   if($('palette').dataset.selected!==String(selected)){scrollSelected();$('palette').dataset.selected=String(selected)}
 }
 function palette(){
   $('palette').innerHTML=types.map((t,i)=>`<button class="gem-choice" data-type="${i}" data-key="${t.key}" aria-label="${i+1}号 ${typeName(i)}"><canvas width="112" height="112"></canvas><span>${i+1}</span><small class="gem-left"></small></button>`).join('');delete $('palette').dataset.selected;
   $('palette-help').hidden=types.length<=6;$('palette-help').textContent=`${types.length} 种宝石 · 滑动选择`;
-  $('palette').querySelectorAll('[data-type]').forEach(b=>{const i=Number(b.dataset.type),t=types[i];b.style.setProperty('--gem-color',colors[t.c].dark);const ctx=b.querySelector('canvas').getContext('2d'),ratio=data.gems[t.key].aspect;drawGem(ctx,{x:56,y:55,w:68*ratio,h:68,angle:0,shape:t.shape,c:t.c,gem:t.key,type:i},true)});
+  $('palette').querySelectorAll('[data-type]').forEach(b=>{const i=Number(b.dataset.type),t=types[i],ctx=b.querySelector('canvas').getContext('2d'),ratio=data.gems[t.key].aspect;drawGem(ctx,{x:56,y:55,w:68*ratio,h:68,angle:0,shape:t.shape,c:t.c,gem:t.key,type:i},true)});
 }
-function setMode(next){mode=next;document.querySelectorAll('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-pressed',b.dataset.mode===mode)});$('hint').textContent=mode==='pan'?'拖动画布 · 双指缩放':mode==='paint'?'划过同号连贴 · 双指缩放':'点击编号 · 长按选宝石';viewport.classList.toggle('panning',mode==='pan')}
+function setMode(next){mode=next;document.querySelectorAll('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-pressed',b.dataset.mode===mode)});$('hint').textContent=mode==='pan'?'拖动画布移动 · 双指缩放':mode==='paint'?'划过相同编号连续贴放 · 双指缩放':'点击对应编号 · 长按空槽选宝石';viewport.classList.toggle('panning',mode==='pan')}
 function load(i){
-  processPoints();flushSave();releasePointers();current=i;types=layouts[i].types;items=layouts[i].items;const boxes=items.map(bounds);artworkBounds={left:Math.min(...boxes.map(b=>b.x)),top:Math.min(...boxes.map(b=>b.y)),right:Math.max(...boxes.map(b=>b.x+b.w)),bottom:Math.max(...boxes.map(b=>b.y+b.h))};filled=saved(i);history=[];activeStroke=[];sparks=[];pendingCache=false;focusId=-1;strokeEnd=false;selected=items.find((s,n)=>!filled.has(n))?.type??0;zoom=1;pan={x:0,y:0};totals=types.map(()=>0);done=types.map(()=>0);items.forEach((s,n)=>{totals[s.type]++;if(filled.has(n))done[s.type]++});
+  processPoints();flushSave();releasePointers();current=i;types=layouts[i].types;items=layouts[i].items;const boxes=items.map(bounds);artworkBounds={left:Math.min(...boxes.map(b=>b.x)),top:Math.min(...boxes.map(b=>b.y)),right:Math.max(...boxes.map(b=>b.x+b.w)),bottom:Math.max(...boxes.map(b=>b.y+b.h))};filled=saved(i);retiredFilled=new Set([...stored(i)].filter(n=>n>=items.length));history=[];activeStroke=[];sparks=[];pendingCache=false;focusId=-1;strokeEnd=false;selected=items.find((s,n)=>!filled.has(n))?.type??0;zoom=1;pan={x:0,y:0};totals=types.map(()=>0);done=types.map(()=>0);items.forEach((s,n)=>{totals[s.type]++;if(filled.has(n))done[s.type]++});
   document.body.className='game-screen';$('selection').hidden=true;document.querySelector('.studio').hidden=false;$('complete').hidden=true;$('title').textContent=layouts[i].name;setMode('tap');rebuildLayers();palette();updateUI();resize();$('back').focus({preventScroll:true});
 }
 function renderGallery(){
@@ -136,18 +135,6 @@ function renderGallery(){
   $('classic-gallery').innerHTML=cards.filter((_,i)=>layouts[i].edition!=='atelier').join('');
   $('selection').querySelectorAll('[data-art]').forEach(b=>{const i=Number(b.dataset.art),layout=layouts[i],hasProgress=progress[i].size>0,ctx=b.querySelector('canvas').getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,500,500);ctx.scale(500/660,500/660);ctx.translate(-70,-70);layout.items.forEach((s,id)=>{const placed=!hasProgress||progress[i].has(id);drawGem(ctx,s,placed,false);if(!placed)drawNumber(ctx,s,false,layout.types)});});
 }
-
-// A reference view is separate from the playable scene and never changes saves.
-function showReference(){
-  pauseGame();const preview=$('reference-canvas'),ctx=preview.getContext('2d');
-  ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,preview.width,preview.height);
-  ctx.scale(preview.width/660,preview.height/660);ctx.translate(-70,-70);
-  items.forEach(s=>drawGem(ctx,s,true,false));$('reference-title').textContent=layouts[current].name+' · 成品参考';
-  $('reference').showModal();
-}
-$('reference-open').onclick=showReference;
-$('reference-close').onclick=()=>$('reference').close();
-$('reference').onclick=e=>{if(e.target===$('reference'))$('reference').close()};
 
 function cancelHold(){clearTimeout(holdTimer);holdTimer=0}
 function releasePointers(){cancelHold();for(const id of pointers.keys())if(viewport.hasPointerCapture(id))viewport.releasePointerCapture(id);pointers.clear();last=null;pinch=null;touchStart=null;touchMoved=false;}
@@ -194,7 +181,7 @@ $('palette').onclick=e=>{const b=e.target.closest('[data-type]');if(b)selectType
 document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
 $('selection').onclick=e=>{const b=e.target.closest('[data-art]');if(b)load(Number(b.dataset.art))};
 $('undo').onclick=()=>{processPoints();commitStroke();if(history.length){const ids=history.pop();for(const id of ids){filled.delete(id);done[items[id].type]--;repaintGem(id)}if(selected!==items[ids[0]].type)selectType(items[ids[0]].type);deferSave();uiDirty=true;pendingCache=false;$('complete').hidden=true;requestDraw()}};
-$('reset').onclick=()=>{if(confirm('要清空这幅画的进度，重新开始吗？')){points=[];releasePointers();filled.clear();history=[];activeStroke=[];focusId=-1;done.fill(0);sceneDirty=true;deferSave();flushSave();pendingCache=false;$('complete').hidden=true;uiDirty=true;requestDraw()}};
+$('reset').onclick=()=>{if(confirm('要清空这幅画的进度，重新开始吗？')){points=[];releasePointers();filled.clear();retiredFilled.clear();history=[];activeStroke=[];focusId=-1;done.fill(0);sceneDirty=true;deferSave();flushSave();pendingCache=false;$('complete').hidden=true;uiDirty=true;requestDraw()}};
 $('continue').onclick=()=>{$('complete').hidden=true};
 $('sound').onclick=()=>{sound=!sound;$('sound').textContent=sound?'♫ 音效开':'♫ 音效关';$('sound').setAttribute('aria-pressed',sound);if(sound)chime()};
 $('back').onclick=()=>{processPoints();flushSave();releasePointers();sparks=[];document.body.className='selection-screen';$('selection').hidden=false;document.querySelector('.studio').hidden=true;renderGallery();$('selection').querySelector(`[data-art="${current}"]`).focus({preventScroll:true})};
