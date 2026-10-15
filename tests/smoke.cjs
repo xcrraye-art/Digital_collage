@@ -46,17 +46,36 @@ const path=require('node:path');
   await page.locator('#back').click();await page.locator('[data-art="2"]').click();assert.equal((await state(page)).items.length,175);await clickGem(page,0);await waitFilled(page,1);
   // Reset clears paint and resets progress without discarding the legacy save.
   page.once('dialog',d=>d.accept());await page.locator('#reset').click();await waitFilled(page,0);
+  // Locating a target must move the camera without placing anything.
+  await page.locator('#find').click();let located=await state(page);assert.ok(located.focusId>=0);assert.equal(located.filled.length,0);
+  const target=await screen(page,located.focusId),box=await page.locator('#canvas').boundingBox();assert.ok(Math.abs(target.x-(box.x+box.width/2))<1&&Math.abs(target.y-(box.y+box.height/2))<1,'Target centered');
+  await clickGem(page,located.focusId);await waitFilled(page,1);assert.equal((await state(page)).focusId,-1);assert.match(await page.locator('#remaining').textContent(),/剩余/);
+  // Wheel zoom keeps the world point below the mouse stationary.
+  await page.locator('#fit').click();await page.waitForFunction(()=>GemGarden.getState().zoom===1);
+  const anchor={x:Math.round(box.x+box.width*.7),y:Math.round(box.y+box.height*.3)};
+  const world=(q,st)=>({x:400+(q.x-box.x-box.width/2-st.pan.x)/(Math.min(box.width,box.height)/660*st.zoom),y:400+(q.y-box.y-box.height/2-st.pan.y)/(Math.min(box.width,box.height)/660*st.zoom)});
+  const before=world(anchor,await state(page));await page.mouse.move(anchor.x,anchor.y);await page.mouse.wheel(0,-120);await page.waitForFunction(()=>GemGarden.getState().zoom>1);const after=world(anchor,await state(page));assert.ok(Math.hypot(before.x-after.x,before.y-after.y)<.01,'Wheel anchor preserved');
+
   let external=[];await page.route('**/assets/**',r=>{external.push(r.request().url());r.abort()});
   await page.goto(origin+'/frontend/gem-garden.html');await page.locator('[data-art="1"]').click();assert.equal((await state(page)).items.length,103);assert.equal(external.length,0);await clickGem(page,0);await waitFilled(page,1);
   await page.unroute('**/assets/**');
   const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:2});const mobile=await ctx.newPage();mobile.on('pageerror',e=>errors.push(e.message));
   await mobile.goto(origin+'/frontend/');await mobile.locator('[data-art="0"]').tap();await clickGem(mobile,0,true);await waitFilled(mobile,1);
   const cdp=await ctx.newCDPSession(mobile),pts=(x,y)=>[{x,y:490,id:1},{x:y,y:490,id:2}];
+  const swipeStart=await screen(mobile,1),swipeEnd=await screen(mobile,2);
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...swipeStart,id:5}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{...swipeEnd,id:5}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  assert.equal((await state(mobile)).filled.length,1,'Sliding in tap mode does not place a gem on release');
+
   await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:pts(165,225)});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:pts(110,280)});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
   assert.ok((await state(mobile)).zoom>2);assert.equal((await state(mobile)).filled.length,1,'Pinch does not place gems');
   await mobile.locator('#fit').tap();await mobile.locator('#back').tap();await mobile.locator('[data-art="3"]').tap();assert.ok(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   assert.equal(await mobile.locator('#canvas').evaluate(c=>c.width),780,'Canvas respects mobile pixel density');
+  await mobile.setViewportSize({width:844,height:390});await mobile.waitForTimeout(150);
+  assert.ok(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  for(const id of ['canvas','find','fit','plus','back']){const r=await mobile.locator('#'+id).boundingBox();assert.ok(r.y>=0&&r.y+r.height<=391,`${id} fits landscape viewport`)}
+  await mobile.locator('#find').tap();const landscape=await state(mobile);assert.ok(landscape.focusId>=0);await clickGem(mobile,landscape.focusId,true);await waitFilled(mobile,1);
+
   assert.deepEqual(errors,[]);
-  console.log('PASS: all four layouts, cached renderer, precise hit testing, wrong-color rejection, undo, new/legacy saves, drag paint, completion, pan/zoom, standalone assets, mobile tap/pinch, DPR and no horizontal overflow.');
+  console.log('PASS: target locator, remaining counts, anchored wheel zoom, touch swipe protection; all four layouts, cached renderer, precise hit testing, wrong-color rejection, undo, new/legacy saves, drag paint, completion, pan/zoom, standalone assets, mobile tap/pinch, DPR and no horizontal overflow.');
  }finally{if(browser)await browser.close();server.kill()}
 })().catch(e=>{console.error(e);process.exitCode=1});

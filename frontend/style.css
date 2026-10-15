@@ -35,3 +35,28 @@
 #canvas{inset:0;transform:none!important;cursor:inherit}
 .load-error{grid-column:1/-1;font-size:13px;line-height:2;color:#a0627c}
 @media(max-width:640px){.gem-choice canvas{width:38px;height:43px}}
+/* Readable targets and touch controls, without changing the white board. */
+.palette-label{display:flex;gap:10px;align-items:center;justify-content:center;min-height:15px}
+#remaining{color:#9a9297;font-size:10px;letter-spacing:0}
+.gem-left{display:block;color:#a49aa1;font-size:9px;line-height:1.4;margin-top:3px}
+.gem-choice.active .gem-left{color:#9d5879}
+.canvas-actions{display:flex;gap:8px;align-items:center}
+.canvas-actions button{min-height:36px;padding:8px 12px}
+.canvas-actions #find{color:#a7597d;border-color:#e9d5df;background:#fffafb}
+.canvas-bottom{gap:12px}.canvas-bottom>span{max-width:55%;line-height:1.7}
+.canvas-wrap{height:calc(100dvh - 357px)}
+@media(max-width:640px){.canvas-wrap{height:calc(100dvh - 343px);min-height:300px}.canvas-actions{gap:5px}.canvas-actions button{min-height:40px;padding:8px 10px}.canvas-bottom>span{max-width:47%}.canvas-bottom{bottom:12px}.gem-choice{min-width:52px}.gem-left{font-size:9px}.modes button{min-height:40px}.tools button{min-height:40px}}
+@media(max-height:700px) and (max-width:640px){.canvas-wrap{min-height:220px}}
+@media(orientation:landscape) and (max-height:550px){
+ .game-screen header{height:44px}
+ .game-screen .studio{display:grid;grid-template-columns:88px minmax(0,1fr);grid-template-rows:52px 2px minmax(0,1fr) 50px;height:calc(100dvh - 44px)}
+ .studio-head{grid-column:1/-1;padding:7px 16px}.progress-track{grid-column:1/-1}
+ .palette-wrap{grid-column:1;grid-row:3/5;min-height:0;justify-content:flex-start;padding:8px 4px;border-right:1px solid var(--line)}
+ .palette-label{flex-direction:column;gap:1px;flex-shrink:0;letter-spacing:0;font-size:10px}
+ #palette{flex-direction:column;gap:3px;overflow-y:auto;overflow-x:hidden;min-height:0}
+ .gem-choice{padding:3px 7px;min-width:54px;flex-shrink:0}.gem-choice canvas{width:30px;height:30px}.gem-choice span{margin:0;font-size:10px}.gem-left{font-size:8px;margin:0}
+ .canvas-wrap{grid-column:2;grid-row:3;height:100%;min-height:0}
+ .toolbar{grid-column:2;grid-row:4;padding:4px 8px;gap:12px;flex-wrap:nowrap;align-items:center}
+ .canvas-bottom{left:12px;right:12px;bottom:7px}.canvas-actions button{min-height:32px;padding:5px 10px}
+ .canvas-bottom>span{font-size:9px}.modes button,.tools button{min-height:36px}
+}
