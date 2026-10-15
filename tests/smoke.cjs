@@ -13,11 +13,22 @@ const path=require('node:path');
   async function screen(p,id){const s=await state(p),g=s.items[id],r=await p.locator('#canvas').boundingBox(),f=Math.min(r.width,r.height)/660*s.zoom;return{x:r.x+r.width/2+s.pan.x+(g.x-400)*f,y:r.y+r.height/2+s.pan.y+(g.y-400)*f}}
   async function clickGem(p,id,touch=false){const q=await screen(p,id);if(touch)await p.touchscreen.tap(q.x,q.y);else await p.mouse.click(q.x,q.y);}
   async function waitFilled(p,n){await p.waitForFunction(n=>GemGarden.getState().filled.length===n,n)}
-  await page.goto(origin);await page.waitForURL('**/frontend/');await page.locator('[data-art="3"]').waitFor();
-  assert.equal(await page.locator('.studio').isVisible(),false);assert.equal(await page.locator('.art-card').count(),4);
+  await page.goto(origin);await page.waitForURL('**/frontend/');await page.locator('[data-art="4"]').waitFor();assert.equal(await page.locator('#gallery .art-card').count(),2);await page.locator('#classic-works summary').click();
+  assert.equal(await page.locator('.studio').isVisible(),false);assert.equal(await page.locator('.art-card').count(),6);
   const coloredPreview=()=>page.locator('[data-art="0"] canvas').evaluate(c=>{const pixels=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let count=0;for(let i=0;i<pixels.length;i+=4)if(Math.max(pixels[i],pixels[i+1],pixels[i+2])-Math.min(pixels[i],pixels[i+1],pixels[i+2])>35)count++;return count});
   const completePreviewPixels=await coloredPreview();assert.match(await page.locator('[data-art="0"] .art-status').textContent(),/成品预览/);
 
+  // Fine-cut editions use their exact smooth silhouette for palette, slots and hits.
+  for(const art of [4,5]){
+   await page.locator(`[data-art="${art}"]`).click();const s=await state(page);
+   assert.equal(s.items.length,art===4?181:397);assert.ok(s.items.every(g=>g.gem.startsWith('atelier-')));
+   for(let type=0;type<s.types.length;type++){
+    await page.locator(`[data-type="${type}"]`).click();await page.locator('#find').click();const located=await state(page);
+    assert.equal(located.items[located.focusId].type,type);await clickGem(page,located.focusId);await waitFilled(page,type+1);
+   }
+   await page.locator('#back').click();await page.locator(`[data-art="${art}"]`).click();await waitFilled(page,s.types.length);
+   assert.equal(await page.locator('#undo').isDisabled(),true);await page.locator('#back').click();
+  }
   await page.evaluate(()=>localStorage.setItem('gem-garden-0',JSON.stringify([0,16])));
   await page.locator('[data-art="0"]').click();assert.equal((await state(page)).items.length,140);
   assert.equal((await state(page)).renderer,'canvas-cache');assert.equal((await state(page)).filled.length,0,'Old index save is not applied to a different layout');
@@ -33,7 +44,7 @@ const path=require('node:path');
   await page.locator('#undo').click();await waitFilled(page,1);await page.locator('[data-type="0"]').click();
 
   await page.locator('#undo').click();await waitFilled(page,0);await clickGem(page,0);await waitFilled(page,1);
-  await page.reload();await page.locator('[data-art="0"]').waitFor();assert.match(await page.locator('[data-art="0"] .art-status').textContent(),/当前进度/);assert.ok(await coloredPreview()<completePreviewPixels*.5,'Thumbnail shows actual partial work');await page.locator('[data-art="0"]').click();await waitFilled(page,1);
+  await page.reload();await page.locator('#classic-works summary').click();await page.locator('[data-art="0"]').waitFor();assert.match(await page.locator('[data-art="0"] .art-status').textContent(),/当前进度/);assert.ok(await coloredPreview()<completePreviewPixels*.5,'Thumbnail shows actual partial work');await page.locator('[data-art="0"]').click();await waitFilled(page,1);
   assert.equal(await page.evaluate(()=>localStorage.getItem('gem-garden-0')),'[0,16]','Legacy save is retained');
   await page.locator('[data-mode="paint"]').click();const a=await screen(page,1),c=await screen(page,2);
   await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(c.x,c.y,{steps:20});await page.mouse.up();
@@ -86,10 +97,10 @@ const path=require('node:path');
 
 
   let external=[];await page.route('**/assets/**',r=>{external.push(r.request().url());r.abort()});
-  await page.goto(origin+'/frontend/gem-garden.html');await page.locator('[data-art="1"]').click();assert.equal((await state(page)).items.length,103);assert.equal(external.length,0);await clickGem(page,0);await waitFilled(page,1);
+  await page.goto(origin+'/frontend/gem-garden.html');await page.locator('#classic-works summary').click();await page.locator('[data-art="1"]').click();assert.equal((await state(page)).items.length,103);assert.equal(external.length,0);await clickGem(page,0);await waitFilled(page,1);
   await page.unroute('**/assets/**');
   const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:2});const mobile=await ctx.newPage();mobile.on('pageerror',e=>errors.push(e.message));
-  await mobile.goto(origin+'/frontend/');await mobile.locator('[data-art="0"]').tap();await clickGem(mobile,0,true);await waitFilled(mobile,1);
+  await mobile.goto(origin+'/frontend/');await mobile.locator('#classic-works summary').tap();await mobile.locator('[data-art="0"]').tap();await clickGem(mobile,0,true);await waitFilled(mobile,1);
   const cdp=await ctx.newCDPSession(mobile),pts=(x,y)=>[{x,y:490,id:1},{x:y,y:490,id:2}];
   const swipeStart=await screen(mobile,1),swipeEnd=await screen(mobile,2);
   await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...swipeStart,id:5}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{...swipeEnd,id:5}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
@@ -112,6 +123,6 @@ const path=require('node:path');
   await mobile.locator('#find').tap();const landscape=await state(mobile);assert.ok(landscape.focusId>=0);await clickGem(mobile,landscape.focusId,true);await waitFilled(mobile,1);
 
   assert.deepEqual(errors,[]);
-  console.log('PASS: background stroke/save cleanup; actual-progress thumbnails, final stroke segment, bounded/recovered camera; separate color/cut types, wrong-shape rejection, 11-type palette, long-press sampling, exact-type locator; target locator, remaining counts, anchored wheel zoom, touch swipe protection; all four layouts, cached renderer, precise hit testing, wrong-color rejection, undo, new/legacy saves, drag paint, completion, pan/zoom, standalone assets, mobile tap/pinch, DPR and no horizontal overflow.');
+  console.log('PASS: both fine-cut editions, all new shape/material hits and saves; background stroke/save cleanup; actual-progress thumbnails, final stroke segment, bounded/recovered camera; separate color/cut types, wrong-shape rejection, 11-type palette, long-press sampling, exact-type locator; target locator, remaining counts, anchored wheel zoom, touch swipe protection; all six layouts, cached renderer, precise hit testing, wrong-color rejection, undo, new/legacy saves, drag paint, completion, pan/zoom, standalone assets, mobile tap/pinch, DPR and no horizontal overflow.');
  }finally{if(browser)await browser.close();server.kill()}
 })().catch(e=>{console.error(e);process.exitCode=1});

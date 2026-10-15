@@ -6,7 +6,7 @@ const colors = [
   {name:'石榴石',dark:'#8f3b2c'}, {name:'黄水晶',dark:'#967a20'}, {name:'海蓝宝',dark:'#45748d'}
 ];
 const WORLD=800, CACHE_SCALE=2, SPRITE_SIZE=256, PAD=16, CELL=64;
-let data, atlas, sprites=new Map(), layouts=[], current=0, items=[], filled=new Set(), history=[], activeStroke=[];
+let data, materials, atlas, sprites=new Map(), layouts=[], current=0, items=[], filled=new Set(), history=[], activeStroke=[];
 const shapeNames={round:"圆形",drop:"水滴形",leaf:"马眼形",heart:"心形"};
 let types=[],totals=[], done=[], selected=0, mode='tap', zoom=1, pan={x:0,y:0}, width=1,height=1,fit=1,dpr=1;
 let artworkBounds=null;
@@ -27,21 +27,22 @@ function makePath(outline){
   const path=new Path2D(),last=outline[outline.length-1],first=outline[0];path.moveTo((last[0]+first[0])/2,(last[1]+first[1])/2);
   outline.forEach((p,i)=>{const prev=outline[(i+outline.length-1)%outline.length],next=outline[(i+1)%outline.length],a=Math.hypot(p[0]-prev[0],p[1]-prev[1]),b=Math.hypot(next[0]-p[0],next[1]-p[1]);const cosine=((p[0]-prev[0])*(next[0]-p[0])+(p[1]-prev[1])*(next[1]-p[1]))/(a*b||1),x=(p[0]+next[0])/2,y=(p[1]+next[1])/2;if(cosine<.35&&Math.min(a,b)>.045){path.lineTo(...p);path.lineTo(x,y)}else path.quadraticCurveTo(p[0],p[1],x,y)});path.closePath();return path;
 }
+const gemKey=s=>s.gem||`${s.shape}-${s.c}`;
 function prepareSprites(){
   for(const [id,g] of Object.entries(data.gems)){
-    const path=makePath(g.outline),size=SPRITE_SIZE+PAD*2;
+    const path=g.path?new Path2D(g.path):makePath(g.outline),size=SPRITE_SIZE+PAD*2;
     const mask=makeCanvas(size),mc=mask.getContext('2d');
     mc.translate(size/2,size/2);mc.scale(SPRITE_SIZE,SPRITE_SIZE);mc.fillStyle='#fff';mc.fill(path);
     const base=makeCanvas(size),bc=base.getContext('2d');bc.translate(size/2,size/2);bc.scale(SPRITE_SIZE,SPRITE_SIZE);bc.clip(path);
-    bc.drawImage(atlas,...g.crop,-.5,-.5,1,1);
-    const gem=makeCanvas(size),gc=gem.getContext('2d');gc.shadowColor='rgba(55,35,40,.26)';gc.shadowBlur=5;gc.shadowOffsetY=3;gc.drawImage(base,0,0);
+    bc.drawImage(atlas,...materials.crops[g.material||id],-.5,-.5,1,1);
+    const gem=makeCanvas(size),gc=gem.getContext('2d');gc.shadowColor='rgba(41,34,38,.18)';gc.shadowBlur=4;gc.shadowOffsetY=2;gc.drawImage(base,0,0);
     // Bake the light rim and inner shadow once. Runtime draws use no filters.
-    const inverse=makeCanvas(size),ic=inverse.getContext('2d');ic.fillStyle='#776b73';ic.fillRect(0,0,size,size);ic.globalCompositeOperation='destination-out';ic.drawImage(mask,0,0);
-    const socket=makeCanvas(size),sc=socket.getContext('2d');sc.translate(size/2,size/2);sc.scale(SPRITE_SIZE,SPRITE_SIZE);sc.clip(path);sc.setTransform(1,0,0,1,0,0);sc.fillStyle='#f8f6f7';sc.fillRect(0,0,size,size);
-    sc.shadowColor='rgba(90,78,86,.55)';sc.shadowBlur=8;sc.globalAlpha=.7;sc.drawImage(inverse,4,5);sc.globalAlpha=1;
+    const inverse=makeCanvas(size),ic=inverse.getContext('2d');ic.fillStyle='#999497';ic.fillRect(0,0,size,size);ic.globalCompositeOperation='destination-out';ic.drawImage(mask,0,0);
+    const socket=makeCanvas(size),sc=socket.getContext('2d');sc.translate(size/2,size/2);sc.scale(SPRITE_SIZE,SPRITE_SIZE);sc.clip(path);sc.setTransform(1,0,0,1,0,0);const ground=sc.createLinearGradient(0,0,size,size);ground.addColorStop(0,'#f0edef');ground.addColorStop(.45,'#faf8f9');ground.addColorStop(1,'#fff');sc.fillStyle=ground;sc.fillRect(0,0,size,size);
+    sc.shadowColor='rgba(91,81,86,.27)';sc.shadowBlur=7;sc.globalAlpha=.7;sc.drawImage(inverse,2,3);sc.globalAlpha=1;
     const rim=makeCanvas(size),rc=rim.getContext('2d');rc.shadowColor='white';rc.shadowBlur=3;rc.drawImage(mask,0,1.5);
     const finalSocket=makeCanvas(size),fc=finalSocket.getContext('2d');fc.drawImage(rim,0,0);fc.drawImage(socket,0,0);
-    const socketActive=makeCanvas(size),ac=socketActive.getContext('2d');ac.drawImage(finalSocket,0,0);ac.translate(size/2,size/2);ac.scale(SPRITE_SIZE,SPRITE_SIZE);ac.fillStyle='rgba(196,167,185,.12)';ac.fill(path);ac.strokeStyle='rgba(173,127,151,.4)';ac.lineWidth=.003;ac.stroke(path);
+    const socketActive=makeCanvas(size),ac=socketActive.getContext('2d');ac.drawImage(finalSocket,0,0);ac.translate(size/2,size/2);ac.scale(SPRITE_SIZE,SPRITE_SIZE);ac.fillStyle='rgba(206,173,187,.08)';ac.fill(path);ac.strokeStyle='rgba(173,127,151,.24)';ac.lineWidth=.003;ac.stroke(path);
     sprites.set(id,{path,gem,socket:finalSocket,socketActive});
     for(const temporary of [mask,base,inverse,rim,socket])temporary.width=0;
   }
@@ -49,7 +50,7 @@ function prepareSprites(){
 const glyphs=new Map();
 function typeName(id){const t=types[id];return `${colors[t.c].name} · ${shapeNames[t.shape]}`}
 function glyph(typeId,active,typeList=types){const t=typeList[typeId],id=`${t.key}-${typeId}-${active}`;if(glyphs.has(id))return glyphs.get(id);const c=makeCanvas(160),ctx=c.getContext('2d');ctx.font='92px Georgia';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=active?colors[t.c].dark:'#a0999f';ctx.fillText(typeId+1,80,83);glyphs.set(id,c);return c}
-function drawGem(ctx,s,placed,highlight=true){ctx.save();ctx.translate(s.x,s.y);ctx.rotate(s.angle*Math.PI/180);const ratio=(SPRITE_SIZE+PAD*2)/SPRITE_SIZE;ctx.drawImage(sprites.get(`${s.shape}-${s.c}`)[placed?'gem':highlight&&s.type===selected?'socketActive':'socket'],-s.w*ratio/2,-s.h*ratio/2,s.w*ratio,s.h*ratio);ctx.restore()}
+function drawGem(ctx,s,placed,highlight=true){ctx.save();ctx.translate(s.x,s.y);ctx.rotate(s.angle*Math.PI/180);const ratio=(SPRITE_SIZE+PAD*2)/SPRITE_SIZE;ctx.drawImage(sprites.get(gemKey(s))[placed?'gem':highlight&&s.type===selected?'socketActive':'socket'],-s.w*ratio/2,-s.h*ratio/2,s.w*ratio,s.h*ratio);ctx.restore()}
 function drawNumber(ctx,s,active=false,typeList=types){const font=Math.min(16,Math.max(3.4,s.w*.31)),size=font*160/92;ctx.drawImage(glyph(s.type,active,typeList),s.x-size/2,s.y-size/2,size,size)}
 function bounds(s){const a=s.angle*Math.PI/180,r=(SPRITE_SIZE+PAD*2)/SPRITE_SIZE;const w=(Math.abs(s.w*Math.cos(a))+Math.abs(s.h*Math.sin(a)))*r/2+2,h=(Math.abs(s.w*Math.sin(a))+Math.abs(s.h*Math.cos(a)))*r/2+2;return{x:s.x-w,y:s.y-h,w:w*2,h:h*2}}
 function cellsIn(b){const cells=[];for(let x=Math.floor(b.x/CELL);x<=Math.floor((b.x+b.w)/CELL);x++)for(let y=Math.floor(b.y/CELL);y<=Math.floor((b.y+b.h)/CELL);y++)cells.push(x+','+y);return cells}
@@ -78,7 +79,7 @@ function cameraChanged(){limitCamera();cameraMoving=true;clearTimeout(cameraTime
 function resize(){if(document.querySelector('.studio').hidden)return;const r=viewport.getBoundingClientRect(),oldFit=fit;width=r.width;height=r.height;fit=Math.min(width,height)/660;if(oldFit>0){pan.x*=fit/oldFit;pan.y*=fit/oldFit;}dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);limitCamera();requestDraw()}
 function visibleIds(){const halfW=width/(fit*zoom*2),halfH=height/(fit*zoom*2);return neighbors({x:400-pan.x/(fit*zoom)-halfW,y:400-pan.y/(fit*zoom)-halfH,w:halfW*2,h:halfH*2})}
 function toWorld(point){const rect=canvas.getBoundingClientRect();return{x:400+(point.x-rect.left-width/2-pan.x)/(fit*zoom),y:400+(point.y-rect.top-height/2-pan.y)/(fit*zoom)}}
-function hit(point){const r=canvas.getBoundingClientRect();if(point.x<r.left||point.x>r.right||point.y<r.top||point.y>r.bottom)return -1;const p=toWorld(point),ids=index.get(Math.floor(p.x/CELL)+','+Math.floor(p.y/CELL))||[];for(const id of ids){if(filled.has(id))continue;const s=items[id],a=s.angle*Math.PI/180,dx=p.x-s.x,dy=p.y-s.y;const x=(dx*Math.cos(a)+dy*Math.sin(a))/s.w,y=(-dx*Math.sin(a)+dy*Math.cos(a))/s.h;if(Math.abs(x)>.5||Math.abs(y)>.5)continue;if(hitContext.isPointInPath(sprites.get(`${s.shape}-${s.c}`).path,x,y))return id}return -1}
+function hit(point){const r=canvas.getBoundingClientRect();if(point.x<r.left||point.x>r.right||point.y<r.top||point.y>r.bottom)return -1;const p=toWorld(point),ids=index.get(Math.floor(p.x/CELL)+','+Math.floor(p.y/CELL))||[];for(const id of ids){if(filled.has(id))continue;const s=items[id],a=s.angle*Math.PI/180,dx=p.x-s.x,dy=p.y-s.y;const x=(dx*Math.cos(a)+dy*Math.sin(a))/s.w,y=(-dx*Math.sin(a)+dy*Math.cos(a))/s.h;if(Math.abs(x)>.5||Math.abs(y)>.5)continue;if(hitContext.isPointInPath(sprites.get(gemKey(s)).path,x,y))return id}return -1}
 function chime(){if(!sound)return;try{audioCtx ||= new (window.AudioContext||window.webkitAudioContext)();audioCtx.resume();const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.frequency.value=650+selected*120;g.gain.setValueAtTime(.04,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+.15);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+.16)}catch{}}
 function place(id){if(id<0||filled.has(id))return;const s=items[id];if(s.type!==selected){if(mode==='tap')notify(`这里需要 ${s.type+1} 号${typeName(s.type)}`);return}filled.add(id);if(id===focusId)focusId=-1;activeStroke.push(id);done[s.type]++;if(filled.size===items.length)pendingCache=true;repaintGem(id);uiDirty=true;deferSave();chime();if(!matchMedia('(prefers-reduced-motion: reduce)').matches){sparks.push({x:s.x,y:s.y,start:performance.now()});if(sparks.length>8)sparks.shift();}}
 function commitStroke(){if(activeStroke.length){history.push(activeStroke);activeStroke=[];uiDirty=true;}}
@@ -96,7 +97,7 @@ function draw(now){
   if(zoom<=1.8||cameraMoving){context.drawImage(slotsLayer,0,0,WORLD,WORLD)}
   else{for(const i of visible){const s=items[i];drawGem(context,s,filled.has(i));if(!filled.has(i))drawNumber(context,s,s.type===selected)}}
   if(focusId>=0&&!filled.has(focusId)){
-    const s=items[focusId],outline=new Path2D();outline.addPath(sprites.get(`${s.shape}-${s.c}`).path,new DOMMatrix().translate(s.x,s.y).rotate(s.angle).scale(s.w*1.15,s.h*1.15));
+    const s=items[focusId],outline=new Path2D();outline.addPath(sprites.get(gemKey(s)).path,new DOMMatrix().translate(s.x,s.y).rotate(s.angle).scale(s.w*1.15,s.h*1.15));
     context.save();context.strokeStyle='#fff';context.lineWidth=4/(fit*zoom);context.stroke(outline);context.strokeStyle='#bf7194';context.lineWidth=1.6/(fit*zoom);context.stroke(outline);context.restore();
   }
   sparks=sparks.filter(s=>now-s.start<380);for(const s of sparks){const t=Math.max(0,(now-s.start)/380);context.save();context.translate(s.x,s.y);context.globalAlpha=1-t;context.strokeStyle='#d7b475';context.lineWidth=1/(fit*zoom);context.beginPath();context.arc(0,0,(6+t*12)/(fit*zoom),0,Math.PI*2);context.stroke();context.fillStyle='#fff';context.shadowColor='#d3b787';context.shadowBlur=3;const r=9*(1-t)/(fit*zoom);context.beginPath();context.moveTo(0,-r);context.lineTo(r/4,-r/4);context.lineTo(r,0);context.lineTo(r/4,r/4);context.lineTo(0,r);context.lineTo(-r/4,r/4);context.lineTo(-r,0);context.lineTo(-r/4,-r/4);context.closePath();context.fill();context.restore()}
@@ -118,7 +119,7 @@ function updateUI(){
 function palette(){
   $('palette').innerHTML=types.map((t,i)=>`<button class="gem-choice" data-type="${i}" data-key="${t.key}" aria-label="${i+1}号 ${typeName(i)}"><canvas width="112" height="112"></canvas><span>${i+1}</span><small class="gem-left"></small></button>`).join('');delete $('palette').dataset.selected;
   $('palette-help').hidden=types.length<=6;$('palette-help').textContent=`${types.length} 种宝石 · 滑动选择`;
-  $('palette').querySelectorAll('[data-type]').forEach(b=>{const i=Number(b.dataset.type),t=types[i],ctx=b.querySelector('canvas').getContext('2d'),ratio=data.gems[t.key].aspect;drawGem(ctx,{x:56,y:55,w:68*ratio,h:68,angle:0,shape:t.shape,c:t.c,type:i},true)});
+  $('palette').querySelectorAll('[data-type]').forEach(b=>{const i=Number(b.dataset.type),t=types[i],ctx=b.querySelector('canvas').getContext('2d'),ratio=data.gems[t.key].aspect;drawGem(ctx,{x:56,y:55,w:68*ratio,h:68,angle:0,shape:t.shape,c:t.c,gem:t.key,type:i},true)});
 }
 function setMode(next){mode=next;document.querySelectorAll('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-pressed',b.dataset.mode===mode)});$('hint').textContent=mode==='pan'?'拖动画布移动 · 双指缩放':mode==='paint'?'划过相同编号连续贴放 · 双指缩放':'点击对应编号 · 长按空槽选宝石';viewport.classList.toggle('panning',mode==='pan')}
 function load(i){
@@ -127,8 +128,10 @@ function load(i){
 }
 function renderGallery(){
   const progress=layouts.map((t,i)=>saved(i));
-  $('gallery').innerHTML=layouts.map((t,i)=>{const count=progress[i].size,pct=Math.round(count/t.items.length*100),partial=count>0&&count<t.items.length;return `<button class="art-card ${partial?'in-progress':''}" data-art="${i}" aria-label="${partial?'继续':'选择'}${t.name}"><div class="art-frame"><span class="art-status">${partial?'当前进度':count===t.items.length?'已完成':'成品预览'}</span><canvas width="500" height="500" aria-hidden="true"></canvas>${count?`<div class="card-progress"><i style="width:${pct}%"></i></div>`:''}</div><span><strong>${t.name}</strong><small>${t.tag} · ${t.items.length} 颗</small><em>${partial?`继续贴画 · ${pct}%`:count?`已完成 ${pct}%`:'开始贴画'}</em></span><span class="arrow">↗</span></button>`}).join('');
-  $('gallery').querySelectorAll('[data-art]').forEach(b=>{const i=Number(b.dataset.art),layout=layouts[i],hasProgress=progress[i].size>0,ctx=b.querySelector('canvas').getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,500,500);ctx.scale(500/660,500/660);ctx.translate(-70,-70);layout.items.forEach((s,id)=>{const placed=!hasProgress||progress[i].has(id);drawGem(ctx,s,placed,false);if(!placed)drawNumber(ctx,s,false,layout.types)});});
+  const cards=layouts.map((t,i)=>{const count=progress[i].size,pct=Math.round(count/t.items.length*100),partial=count>0&&count<t.items.length;return `<button class="art-card ${partial?'in-progress':''}" data-art="${i}" aria-label="${partial?'继续':'选择'}${t.name}"><div class="art-frame"><span class="art-status">${partial?'当前进度':count===t.items.length?'已完成':'成品预览'}</span><canvas width="500" height="500" aria-hidden="true"></canvas>${count?`<div class="card-progress"><i style="width:${pct}%"></i></div>`:''}</div><span><strong>${t.name}</strong><small>${t.tag} · ${t.items.length} 颗</small><em>${partial?`继续贴画 · ${pct}%`:count?`已完成 ${pct}%`:'开始贴画'}</em></span><span class="arrow">↗</span></button>`});
+  $('gallery').innerHTML=cards.filter((_,i)=>layouts[i].edition==='atelier').join('');
+  $('classic-gallery').innerHTML=cards.filter((_,i)=>layouts[i].edition!=='atelier').join('');
+  $('selection').querySelectorAll('[data-art]').forEach(b=>{const i=Number(b.dataset.art),layout=layouts[i],hasProgress=progress[i].size>0,ctx=b.querySelector('canvas').getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,500,500);ctx.scale(500/660,500/660);ctx.translate(-70,-70);layout.items.forEach((s,id)=>{const placed=!hasProgress||progress[i].has(id);drawGem(ctx,s,placed,false);if(!placed)drawNumber(ctx,s,false,layout.types)});});
 }
 
 function cancelHold(){clearTimeout(holdTimer);holdTimer=0}
@@ -174,12 +177,12 @@ viewport.addEventListener('wheel',e=>{e.preventDefault();const delta=e.deltaY*(e
 $('plus').onclick=()=>zoomBy(.4);$('minus').onclick=()=>zoomBy(-.4);$('fit').onclick=()=>{zoom=1;pan={x:0,y:0};focusId=-1;uiDirty=true;requestDraw()};
 $('palette').onclick=e=>{const b=e.target.closest('[data-type]');if(b)selectType(Number(b.dataset.type))};
 document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
-$('gallery').onclick=e=>{const b=e.target.closest('[data-art]');if(b)load(Number(b.dataset.art))};
+$('selection').onclick=e=>{const b=e.target.closest('[data-art]');if(b)load(Number(b.dataset.art))};
 $('undo').onclick=()=>{processPoints();commitStroke();if(history.length){const ids=history.pop();for(const id of ids){filled.delete(id);done[items[id].type]--;repaintGem(id)}if(selected!==items[ids[0]].type)selectType(items[ids[0]].type);deferSave();uiDirty=true;pendingCache=false;$('complete').hidden=true;requestDraw()}};
 $('reset').onclick=()=>{if(confirm('要清空这幅画的进度，重新开始吗？')){points=[];releasePointers();filled.clear();history=[];activeStroke=[];focusId=-1;done.fill(0);sceneDirty=true;deferSave();flushSave();pendingCache=false;$('complete').hidden=true;uiDirty=true;requestDraw()}};
 $('continue').onclick=()=>{$('complete').hidden=true};
 $('sound').onclick=()=>{sound=!sound;$('sound').textContent=sound?'♫ 音效开':'♫ 音效关';$('sound').setAttribute('aria-pressed',sound);if(sound)chime()};
-$('back').onclick=()=>{processPoints();flushSave();releasePointers();sparks=[];document.body.className='selection-screen';$('selection').hidden=false;document.querySelector('.studio').hidden=true;renderGallery();$('gallery').querySelector(`[data-art="${current}"]`).focus({preventScroll:true})};
+$('back').onclick=()=>{processPoints();flushSave();releasePointers();sparks=[];document.body.className='selection-screen';$('selection').hidden=false;document.querySelector('.studio').hidden=true;renderGallery();$('selection').querySelector(`[data-art="${current}"]`).focus({preventScroll:true})};
 function pauseGame(){processPoints();if(activeStroke.length||strokeEnd)finishStroke();releasePointers();flushSave();}
 window.addEventListener('pagehide',pauseGame);document.addEventListener('visibilitychange',()=>{if(document.hidden)pauseGame()});new ResizeObserver(resize).observe(viewport);
 // Read-only diagnostics are also useful for browser regression tests.
@@ -187,9 +190,10 @@ window.GemGarden={getState:()=>({current,layout:layouts[current]?.id,items:items
 (async()=>{
   try{
     data=window.GEM_GEOMETRY||await fetch('assets/geometry.json').then(r=>{if(!r.ok)throw Error('Geometry unavailable');return r.json()});layouts=data.layouts.map(layout=>{
-      const types=[],byKey=new Map();const items=layout.items.map(s=>{const key=`${s.shape}-${s.c}`;if(!byKey.has(key)){byKey.set(key,types.length);types.push({key,c:s.c,shape:s.shape})}return{...s,type:byKey.get(key)}});return{...layout,types,items};
+      const types=[],byKey=new Map();const items=layout.items.map(s=>{const key=gemKey(s);if(!byKey.has(key)){byKey.set(key,types.length);types.push({key,c:s.c,shape:s.shape})}return{...s,type:byKey.get(key)}});return{...layout,types,items};
     });
-    atlas=new Image();atlas.src=window.GEM_ATLAS_DATA||'assets/gemstones.png';await atlas.decode();prepareSprites();renderGallery();
+    materials=window.GEM_MATERIALS||await fetch('assets/polished-atlas.json').then(r=>{if(!r.ok)throw Error('Materials unavailable');return r.json()});
+    atlas=new Image();atlas.src=window.GEM_ATLAS_DATA||'assets/polished-gems.png';await atlas.decode();prepareSprites();renderGallery();
     $('gallery').setAttribute('aria-busy','false');
   }catch(error){console.error(error);$('gallery').innerHTML='<p class="load-error">素材加载失败，请刷新页面，或确认已下载完整的 frontend 文件夹。</p>';notify('贴画素材加载失败')}
 })();

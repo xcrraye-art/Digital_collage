@@ -11,6 +11,7 @@
 - `frontend/gem-garden.html`：含素材的单文件版，可直接打开
 - `frontend/README.md`：玩法、开发与测试说明
 - `scripts/bundle.py`：生成单文件版
+- `scripts/atelier.py`：追加两幅精修作品、生成解析曲线并检查间距
 - `scripts/layouts.py`：按主体几何生成排布并检查间距（开发工具需要 Pillow）
 - `tests/smoke.cjs`：浏览器功能与触摸回归检查
 
@@ -29,4 +30,4 @@ python3 -m http.server 8000 --bind 0.0.0.0
 
 使用 `main` 分支的根目录发布。根目录 `index.html` 会转到 `frontend/`，原来的站点入口仍可使用。
 
-四幅贴画已按大小填隙重新排布，并使用缓存 Canvas 绘制。新版使用独立存档，原有旧版存档保留；详细说明见 `frontend/README.md`。
+选图页展示两幅精修作品，原版四幅可展开继续。所有作品使用新宝石材质、白色凹槽与缓存 Canvas 绘制。新版使用独立存档，原有旧版存档保留；详细说明见 `frontend/README.md`。
