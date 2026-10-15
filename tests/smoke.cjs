@@ -15,6 +15,9 @@ const path=require('node:path');
   async function waitFilled(p,n){await p.waitForFunction(n=>GemGarden.getState().filled.length===n,n)}
   await page.goto(origin);await page.waitForURL('**/frontend/');await page.locator('[data-art="3"]').waitFor();
   assert.equal(await page.locator('.studio').isVisible(),false);assert.equal(await page.locator('.art-card').count(),4);
+  const coloredPreview=()=>page.locator('[data-art="0"] canvas').evaluate(c=>{const pixels=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let count=0;for(let i=0;i<pixels.length;i+=4)if(Math.max(pixels[i],pixels[i+1],pixels[i+2])-Math.min(pixels[i],pixels[i+1],pixels[i+2])>35)count++;return count});
+  const completePreviewPixels=await coloredPreview();assert.match(await page.locator('[data-art="0"] .art-status').textContent(),/成品预览/);
+
   await page.evaluate(()=>localStorage.setItem('gem-garden-0',JSON.stringify([0,16])));
   await page.locator('[data-art="0"]').click();assert.equal((await state(page)).items.length,140);
   assert.equal((await state(page)).renderer,'canvas-cache');assert.equal((await state(page)).filled.length,0,'Old index save is not applied to a different layout');
@@ -30,12 +33,22 @@ const path=require('node:path');
   await page.locator('#undo').click();await waitFilled(page,1);await page.locator('[data-type="0"]').click();
 
   await page.locator('#undo').click();await waitFilled(page,0);await clickGem(page,0);await waitFilled(page,1);
-  await page.reload();await page.locator('[data-art="0"]').click();await waitFilled(page,1);
+  await page.reload();await page.locator('[data-art="0"]').waitFor();assert.match(await page.locator('[data-art="0"] .art-status').textContent(),/当前进度/);assert.ok(await coloredPreview()<completePreviewPixels*.5,'Thumbnail shows actual partial work');await page.locator('[data-art="0"]').click();await waitFilled(page,1);
   assert.equal(await page.evaluate(()=>localStorage.getItem('gem-garden-0')),'[0,16]','Legacy save is retained');
   await page.locator('[data-mode="paint"]').click();const a=await screen(page,1),c=await screen(page,2);
   await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(c.x,c.y,{steps:20});await page.mouse.up();
   await page.waitForFunction(()=>GemGarden.getState().filled.length>=3);
   await page.locator('#undo').click();await waitFilled(page,1);assert.equal((await state(page)).selected,0,'Undo restores the stroke type');
+  // Release at a new coordinate without a preceding move event: fill the final segment.
+  const desktopInput=await page.context().newCDPSession(page);await page.mouse.move(a.x,a.y);await page.mouse.down();
+  await desktopInput.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:c.x,y:c.y,button:'left',buttons:0,clickCount:1});await page.mouse.up();
+  await page.waitForFunction(()=>GemGarden.getState().filled.length>=3);await page.locator('#undo').click();await waitFilled(page,1);
+  // Leaving during a held stroke flushes progress and clears captured pointers.
+  await page.mouse.move(a.x,a.y);await page.mouse.down();await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));await page.mouse.up();
+  await waitFilled(page,2);assert.equal((await state(page)).activePointers,0);assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('gem-garden-v3-flower')).length),2);
+  await page.locator('#undo').click();await waitFilled(page,1);
+
+
   for(let type=0;type<(await state(page)).types.length;type++){
    await page.locator(`[data-type="${type}"]`).click();
    await page.waitForFunction(c=>GemGarden.getState().selected===c,type);
@@ -64,6 +77,13 @@ const path=require('node:path');
   const anchor={x:Math.round(box.x+box.width*.7),y:Math.round(box.y+box.height*.3)};
   const world=(q,st)=>({x:400+(q.x-box.x-box.width/2-st.pan.x)/(Math.min(box.width,box.height)/660*st.zoom),y:400+(q.y-box.y-box.height/2-st.pan.y)/(Math.min(box.width,box.height)/660*st.zoom)});
   const before=world(anchor,await state(page));await page.mouse.move(anchor.x,anchor.y);await page.mouse.wheel(0,-120);await page.waitForFunction(()=>GemGarden.getState().zoom>1);const after=world(anchor,await state(page));assert.ok(Math.hypot(before.x-after.x,before.y-after.y)<.01,'Wheel anchor preserved');
+  // Multiple long pans cannot lose the picture off screen.
+  await page.locator('#fit').click();await page.locator('[data-mode="pan"]').click();
+  const board=await page.locator('#canvas').boundingBox();for(let i=0;i<5;i++){await page.mouse.move(board.x+board.width*.25,board.y+board.height*.25);await page.mouse.down();await page.mouse.move(board.x+board.width*.9,board.y+board.height*.9);await page.mouse.up()}
+  await page.waitForTimeout(160);const bounded=await state(page),scale=Math.min(board.width,board.height)/660*bounded.zoom;
+  assert.ok(Math.abs(bounded.pan.x)<board.width*2&&Math.abs(bounded.pan.y)<board.height*2,'Pan range bounded');
+  assert.ok(bounded.items.some(s=>{const x=board.width/2+bounded.pan.x+(s.x-400)*scale,y=board.height/2+bounded.pan.y+(s.y-400)*scale;return x>=0&&x<=board.width&&y>=0&&y<=board.height}),'Artwork remains reachable in viewport');
+
 
   let external=[];await page.route('**/assets/**',r=>{external.push(r.request().url());r.abort()});
   await page.goto(origin+'/frontend/gem-garden.html');await page.locator('[data-art="1"]').click();assert.equal((await state(page)).items.length,103);assert.equal(external.length,0);await clickGem(page,0);await waitFilled(page,1);
@@ -92,6 +112,6 @@ const path=require('node:path');
   await mobile.locator('#find').tap();const landscape=await state(mobile);assert.ok(landscape.focusId>=0);await clickGem(mobile,landscape.focusId,true);await waitFilled(mobile,1);
 
   assert.deepEqual(errors,[]);
-  console.log('PASS: separate color/cut types, wrong-shape rejection, 11-type palette, long-press sampling, exact-type locator; target locator, remaining counts, anchored wheel zoom, touch swipe protection; all four layouts, cached renderer, precise hit testing, wrong-color rejection, undo, new/legacy saves, drag paint, completion, pan/zoom, standalone assets, mobile tap/pinch, DPR and no horizontal overflow.');
+  console.log('PASS: background stroke/save cleanup; actual-progress thumbnails, final stroke segment, bounded/recovered camera; separate color/cut types, wrong-shape rejection, 11-type palette, long-press sampling, exact-type locator; target locator, remaining counts, anchored wheel zoom, touch swipe protection; all four layouts, cached renderer, precise hit testing, wrong-color rejection, undo, new/legacy saves, drag paint, completion, pan/zoom, standalone assets, mobile tap/pinch, DPR and no horizontal overflow.');
  }finally{if(browser)await browser.close();server.kill()}
 })().catch(e=>{console.error(e);process.exitCode=1});

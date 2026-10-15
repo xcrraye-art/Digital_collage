@@ -9,6 +9,7 @@ const WORLD=800, CACHE_SCALE=2, SPRITE_SIZE=256, PAD=16, CELL=64;
 let data, atlas, sprites=new Map(), layouts=[], current=0, items=[], filled=new Set(), history=[], activeStroke=[];
 const shapeNames={round:"圆形",drop:"水滴形",leaf:"马眼形",heart:"心形"};
 let types=[],totals=[], done=[], selected=0, mode='tap', zoom=1, pan={x:0,y:0}, width=1,height=1,fit=1,dpr=1;
+let artworkBounds=null;
 let slotsLayer, index=new Map(), frame=0, points=[], strokeEnd=false, uiDirty=false, saveDirty=false, sceneDirty=false, cameraMoving=false, cameraTimer;
 let sound=false, audioCtx, saveTimer, toastTimer, sparks=[], pendingCache=false;
 const pointers=new Map(); let last=null,pinch=null,touchStart=null,touchMoved=false,focusId=-1,holdTimer=0,holdPicked=false;
@@ -47,9 +48,9 @@ function prepareSprites(){
 }
 const glyphs=new Map();
 function typeName(id){const t=types[id];return `${colors[t.c].name} · ${shapeNames[t.shape]}`}
-function glyph(typeId,active){const t=types[typeId],id=`${t.key}-${typeId}-${active}`;if(glyphs.has(id))return glyphs.get(id);const c=makeCanvas(160),ctx=c.getContext('2d');ctx.font='92px Georgia';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=active?colors[t.c].dark:'#a0999f';ctx.fillText(typeId+1,80,83);glyphs.set(id,c);return c}
-function drawGem(ctx,s,placed){ctx.save();ctx.translate(s.x,s.y);ctx.rotate(s.angle*Math.PI/180);const ratio=(SPRITE_SIZE+PAD*2)/SPRITE_SIZE;ctx.drawImage(sprites.get(`${s.shape}-${s.c}`)[placed?'gem':s.type===selected?'socketActive':'socket'],-s.w*ratio/2,-s.h*ratio/2,s.w*ratio,s.h*ratio);ctx.restore()}
-function drawNumber(ctx,s,active=false){const font=Math.min(16,Math.max(3.4,s.w*.31)),size=font*160/92;ctx.drawImage(glyph(s.type,active),s.x-size/2,s.y-size/2,size,size)}
+function glyph(typeId,active,typeList=types){const t=typeList[typeId],id=`${t.key}-${typeId}-${active}`;if(glyphs.has(id))return glyphs.get(id);const c=makeCanvas(160),ctx=c.getContext('2d');ctx.font='92px Georgia';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=active?colors[t.c].dark:'#a0999f';ctx.fillText(typeId+1,80,83);glyphs.set(id,c);return c}
+function drawGem(ctx,s,placed,highlight=true){ctx.save();ctx.translate(s.x,s.y);ctx.rotate(s.angle*Math.PI/180);const ratio=(SPRITE_SIZE+PAD*2)/SPRITE_SIZE;ctx.drawImage(sprites.get(`${s.shape}-${s.c}`)[placed?'gem':highlight&&s.type===selected?'socketActive':'socket'],-s.w*ratio/2,-s.h*ratio/2,s.w*ratio,s.h*ratio);ctx.restore()}
+function drawNumber(ctx,s,active=false,typeList=types){const font=Math.min(16,Math.max(3.4,s.w*.31)),size=font*160/92;ctx.drawImage(glyph(s.type,active,typeList),s.x-size/2,s.y-size/2,size,size)}
 function bounds(s){const a=s.angle*Math.PI/180,r=(SPRITE_SIZE+PAD*2)/SPRITE_SIZE;const w=(Math.abs(s.w*Math.cos(a))+Math.abs(s.h*Math.sin(a)))*r/2+2,h=(Math.abs(s.w*Math.sin(a))+Math.abs(s.h*Math.cos(a)))*r/2+2;return{x:s.x-w,y:s.y-h,w:w*2,h:h*2}}
 function cellsIn(b){const cells=[];for(let x=Math.floor(b.x/CELL);x<=Math.floor((b.x+b.w)/CELL);x++)for(let y=Math.floor(b.y/CELL);y<=Math.floor((b.y+b.h)/CELL);y++)cells.push(x+','+y);return cells}
 function neighbors(b){const ids=new Set();for(const cell of cellsIn(b))for(const id of index.get(cell)||[])ids.add(id);return [...ids].sort((a,b)=>a-b)}
@@ -59,8 +60,22 @@ function rebuildLayers(){
   items.forEach((s,i)=>{for(const cell of cellsIn(bounds(s))){if(!index.has(cell))index.set(cell,[]);index.get(cell).push(i)}});repaintScene();
 }
 function repaintGem(id){const ctx=slotsLayer.getContext('2d'),b=bounds(items[id]);ctx.save();ctx.beginPath();ctx.rect(b.x,b.y,b.w,b.h);ctx.clip();ctx.clearRect(b.x,b.y,b.w,b.h);for(const i of neighbors(b)){const s=items[i];drawGem(ctx,s,filled.has(i));if(!filled.has(i))drawNumber(ctx,s,s.type===selected)}ctx.restore()}
-function cameraChanged(){cameraMoving=true;clearTimeout(cameraTimer);cameraTimer=setTimeout(()=>{cameraMoving=false;requestDraw()},100);requestDraw()}
-function resize(){if(document.querySelector('.studio').hidden)return;const r=viewport.getBoundingClientRect(),oldFit=fit;width=r.width;height=r.height;fit=Math.min(width,height)/660;if(oldFit>0){pan.x*=fit/oldFit;pan.y*=fit/oldFit;}dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);requestDraw()}
+function limitCamera(){
+  if(!artworkBounds)return;const k=fit*zoom,margin=Math.min(64,width*.18,height*.18);
+  const minX=margin-width/2-(artworkBounds.right-400)*k,maxX=width/2-margin-(artworkBounds.left-400)*k;
+  const minY=margin-height/2-(artworkBounds.bottom-400)*k,maxY=height/2-margin-(artworkBounds.top-400)*k;
+  pan.x=Math.max(minX,Math.min(maxX,pan.x));pan.y=Math.max(minY,Math.min(maxY,pan.y));
+}
+function recoverEmptyCamera(){
+  const k=fit*zoom,margin=Math.min(32,width*.1,height*.1);
+  const hasVisible=items.some(s=>{const b=bounds(s),x=width/2+pan.x+(b.x-400)*k,y=height/2+pan.y+(b.y-400)*k;return x+b.w*k>margin&&x<width-margin&&y+b.h*k>margin&&y<height-margin});
+  if(hasVisible)return;
+  let best=null,distance=Infinity;for(const s of items){const x=width/2+pan.x+(s.x-400)*k,y=height/2+pan.y+(s.y-400)*k,dx=Math.max(margin-x,0,x-(width-margin)),dy=Math.max(margin-y,0,y-(height-margin));if(dx*dx+dy*dy<distance){distance=dx*dx+dy*dy;best={x,y}}}
+  if(best){pan.x+=Math.max(margin,Math.min(width-margin,best.x))-best.x;pan.y+=Math.max(margin,Math.min(height-margin,best.y))-best.y;}
+}
+function cameraChanged(){limitCamera();cameraMoving=true;clearTimeout(cameraTimer);cameraTimer=setTimeout(()=>{if(!pointers.size)recoverEmptyCamera();cameraMoving=false;requestDraw()},100);requestDraw()}
+
+function resize(){if(document.querySelector('.studio').hidden)return;const r=viewport.getBoundingClientRect(),oldFit=fit;width=r.width;height=r.height;fit=Math.min(width,height)/660;if(oldFit>0){pan.x*=fit/oldFit;pan.y*=fit/oldFit;}dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);limitCamera();requestDraw()}
 function visibleIds(){const halfW=width/(fit*zoom*2),halfH=height/(fit*zoom*2);return neighbors({x:400-pan.x/(fit*zoom)-halfW,y:400-pan.y/(fit*zoom)-halfH,w:halfW*2,h:halfH*2})}
 function toWorld(point){const rect=canvas.getBoundingClientRect();return{x:400+(point.x-rect.left-width/2-pan.x)/(fit*zoom),y:400+(point.y-rect.top-height/2-pan.y)/(fit*zoom)}}
 function hit(point){const r=canvas.getBoundingClientRect();if(point.x<r.left||point.x>r.right||point.y<r.top||point.y>r.bottom)return -1;const p=toWorld(point),ids=index.get(Math.floor(p.x/CELL)+','+Math.floor(p.y/CELL))||[];for(const id of ids){if(filled.has(id))continue;const s=items[id],a=s.angle*Math.PI/180,dx=p.x-s.x,dy=p.y-s.y;const x=(dx*Math.cos(a)+dy*Math.sin(a))/s.w,y=(-dx*Math.sin(a)+dy*Math.cos(a))/s.h;if(Math.abs(x)>.5||Math.abs(y)>.5)continue;if(hitContext.isPointInPath(sprites.get(`${s.shape}-${s.c}`).path,x,y))return id}return -1}
@@ -107,17 +122,26 @@ function palette(){
 }
 function setMode(next){mode=next;document.querySelectorAll('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-pressed',b.dataset.mode===mode)});$('hint').textContent=mode==='pan'?'拖动画布移动 · 双指缩放':mode==='paint'?'划过相同编号连续贴放 · 双指缩放':'点击对应编号 · 长按空槽选宝石';viewport.classList.toggle('panning',mode==='pan')}
 function load(i){
-  processPoints();flushSave();releasePointers();current=i;types=layouts[i].types;items=layouts[i].items;filled=saved(i);history=[];activeStroke=[];sparks=[];pendingCache=false;focusId=-1;strokeEnd=false;selected=items.find((s,n)=>!filled.has(n))?.type??0;zoom=1;pan={x:0,y:0};totals=types.map(()=>0);done=types.map(()=>0);items.forEach((s,n)=>{totals[s.type]++;if(filled.has(n))done[s.type]++});
+  processPoints();flushSave();releasePointers();current=i;types=layouts[i].types;items=layouts[i].items;const boxes=items.map(bounds);artworkBounds={left:Math.min(...boxes.map(b=>b.x)),top:Math.min(...boxes.map(b=>b.y)),right:Math.max(...boxes.map(b=>b.x+b.w)),bottom:Math.max(...boxes.map(b=>b.y+b.h))};filled=saved(i);history=[];activeStroke=[];sparks=[];pendingCache=false;focusId=-1;strokeEnd=false;selected=items.find((s,n)=>!filled.has(n))?.type??0;zoom=1;pan={x:0,y:0};totals=types.map(()=>0);done=types.map(()=>0);items.forEach((s,n)=>{totals[s.type]++;if(filled.has(n))done[s.type]++});
   document.body.className='game-screen';$('selection').hidden=true;document.querySelector('.studio').hidden=false;$('complete').hidden=true;$('title').textContent=layouts[i].name;setMode('tap');rebuildLayers();palette();updateUI();resize();$('back').focus({preventScroll:true});
 }
 function renderGallery(){
-  $('gallery').innerHTML=layouts.map((t,i)=>{const count=saved(i).size;return `<button class="art-card" data-art="${i}" aria-label="选择${t.name}"><div class="art-frame"><canvas width="500" height="500" aria-hidden="true"></canvas></div><span><strong>${t.name}</strong><small>${t.tag} · ${t.items.length} 颗</small><em>${count?`已完成 ${Math.round(count/t.items.length*100)}%`:'开始贴画'}</em></span><span class="arrow">↗</span></button>`}).join('');
-  $('gallery').querySelectorAll('[data-art]').forEach(b=>{const ctx=b.querySelector('canvas').getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,500,500);ctx.scale(500/660,500/660);ctx.translate(-70,-70);for(const s of layouts[Number(b.dataset.art)].items)drawGem(ctx,s,true)});
+  const progress=layouts.map((t,i)=>saved(i));
+  $('gallery').innerHTML=layouts.map((t,i)=>{const count=progress[i].size,pct=Math.round(count/t.items.length*100),partial=count>0&&count<t.items.length;return `<button class="art-card ${partial?'in-progress':''}" data-art="${i}" aria-label="${partial?'继续':'选择'}${t.name}"><div class="art-frame"><span class="art-status">${partial?'当前进度':count===t.items.length?'已完成':'成品预览'}</span><canvas width="500" height="500" aria-hidden="true"></canvas>${count?`<div class="card-progress"><i style="width:${pct}%"></i></div>`:''}</div><span><strong>${t.name}</strong><small>${t.tag} · ${t.items.length} 颗</small><em>${partial?`继续贴画 · ${pct}%`:count?`已完成 ${pct}%`:'开始贴画'}</em></span><span class="arrow">↗</span></button>`}).join('');
+  $('gallery').querySelectorAll('[data-art]').forEach(b=>{const i=Number(b.dataset.art),layout=layouts[i],hasProgress=progress[i].size>0,ctx=b.querySelector('canvas').getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,500,500);ctx.scale(500/660,500/660);ctx.translate(-70,-70);layout.items.forEach((s,id)=>{const placed=!hasProgress||progress[i].has(id);drawGem(ctx,s,placed,false);if(!placed)drawNumber(ctx,s,false,layout.types)});});
 }
+
 function cancelHold(){clearTimeout(holdTimer);holdTimer=0}
 function releasePointers(){cancelHold();for(const id of pointers.keys())if(viewport.hasPointerCapture(id))viewport.releasePointerCapture(id);pointers.clear();last=null;pinch=null;touchStart=null;touchMoved=false;}
 function pair(){const [a,b]=[...pointers.values()];return{distance:Math.hypot(a.x-b.x,a.y-b.y),mid:{x:(a.x+b.x)/2,y:(a.y+b.y)/2}}}
 function queuePoint(p){points.push(p);requestDraw()}
+function queueSegment(a,b){
+  // Clip before sampling so fast strokes outside the board cannot create huge queues.
+  const r=canvas.getBoundingClientRect(),dx=b.x-a.x,dy=b.y-a.y;let lo=0,hi=1;
+  for(const [p,q] of [[-dx,a.x-r.left],[dx,r.right-a.x],[-dy,a.y-r.top],[dy,r.bottom-a.y]]){if(p===0){if(q<0)return;continue}const t=q/p;if(p<0)lo=Math.max(lo,t);else hi=Math.min(hi,t);if(lo>hi)return;}
+  const x=a.x+dx*lo,y=a.y+dy*lo,ex=a.x+dx*hi,ey=a.y+dy*hi,n=Math.max(1,Math.ceil(Math.hypot(ex-x,ey-y)/1.5));
+  for(let i=0;i<=n;i++)points.push({x:x+(ex-x)*i/n,y:y+(ey-y)*i/n});requestDraw();
+}
 viewport.addEventListener('pointerdown',e=>{if(e.target.closest('button')||!$('complete').hidden||e.button>0)return;if(!pointers.size){processPoints();if(strokeEnd||activeStroke.length)finishStroke();}pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});viewport.setPointerCapture(e.pointerId);if(pointers.size===2){cancelHold();points=[];touchMoved=true;pinch=pair();last=null;return}if(pointers.size>2)return;last={x:e.clientX,y:e.clientY};touchStart={...last};touchMoved=false;holdPicked=false;cancelHold();if(e.pointerType==='touch'&&mode==='tap'){
     const id=hit(last);if(id>=0)holdTimer=setTimeout(()=>{if(pointers.size===1&&!touchMoved&&!pinch){selectType(items[id].type);focusId=id;holdPicked=true;notify(`已选择 ${items[id].type+1}号 ${typeName(items[id].type)}`)}},500);
   }if(e.pointerType!=='touch'&&mode!=='pan')queuePoint(last)});
@@ -126,10 +150,14 @@ viewport.addEventListener('pointermove',e=>{
   if(pointers.size===2){const next=pair();if(pinch&&pinch.distance>0){const r=viewport.getBoundingClientRect(),old=zoom;zoom=Math.max(.7,Math.min(8,zoom*next.distance/pinch.distance));const ratio=zoom/old;pan.x=(pan.x-(pinch.mid.x-r.left-width/2))*ratio+(next.mid.x-r.left-width/2);pan.y=(pan.y-(pinch.mid.y-r.top-height/2))*ratio+(next.mid.y-r.top-height/2);uiDirty=true;cameraChanged()}pinch=next;return}
   if(!last||pinch)return;
   if(mode==='pan'){pan.x+=p.x-last.x;pan.y+=p.y-last.y;cameraChanged()}
-  else if(mode==='paint'){const dx=p.x-last.x,dy=p.y-last.y,n=Math.max(1,Math.ceil(Math.hypot(dx,dy)/2));for(let i=0;i<=n;i++)points.push({x:last.x+dx*i/n,y:last.y+dy*i/n});requestDraw()}
+  else if(mode==='paint'){const samples=e.getCoalescedEvents?.()||[];let from=last;for(const sample of [...samples,e]){const to={x:sample.clientX,y:sample.clientY};queueSegment(from,to);from=to;}}
   last=p;
 });
-function pointerEnd(e){if(!pointers.has(e.pointerId))return;cancelHold();if(e.type==='pointerup'&&pointers.size===1&&!pinch&&e.pointerType==='touch'&&mode!=='pan'&&!holdPicked&&(mode==='paint'||!touchMoved))queuePoint({x:e.clientX,y:e.clientY});pointers.delete(e.pointerId);last=null;if(!pointers.size){pinch=null;strokeEnd=true;requestDraw()}}
+function pointerEnd(e){
+  if(!pointers.has(e.pointerId))return;cancelHold();
+  if(e.type==='pointerup'&&pointers.size===1&&!pinch&&!holdPicked){const end={x:e.clientX,y:e.clientY};if(mode==='paint'&&last)queueSegment(last,end);else if(e.pointerType==='touch'&&mode==='tap'&&!touchMoved)queuePoint(end);}
+  const movedCamera=mode==='pan'||!!pinch;pointers.delete(e.pointerId);last=null;if(!pointers.size){pinch=null;strokeEnd=true;if(movedCamera)cameraChanged();requestDraw()}
+}
 for(const event of ['pointerup','pointercancel','lostpointercapture'])viewport.addEventListener(event,pointerEnd);
 function zoomAt(next,anchor){const rect=viewport.getBoundingClientRect(),x=anchor?anchor.x-rect.left-width/2:0,y=anchor?anchor.y-rect.top-height/2:0,old=zoom;zoom=Math.max(.7,Math.min(8,next));const ratio=zoom/old;pan.x=(pan.x-x)*ratio+x;pan.y=(pan.y-y)*ratio+y;uiDirty=true;cameraChanged()}
 function zoomBy(delta){zoomAt(zoom+delta)}
@@ -152,9 +180,10 @@ $('reset').onclick=()=>{if(confirm('要清空这幅画的进度，重新开始�
 $('continue').onclick=()=>{$('complete').hidden=true};
 $('sound').onclick=()=>{sound=!sound;$('sound').textContent=sound?'♫ 音效开':'♫ 音效关';$('sound').setAttribute('aria-pressed',sound);if(sound)chime()};
 $('back').onclick=()=>{processPoints();flushSave();releasePointers();sparks=[];document.body.className='selection-screen';$('selection').hidden=false;document.querySelector('.studio').hidden=true;renderGallery();$('gallery').querySelector(`[data-art="${current}"]`).focus({preventScroll:true})};
-window.addEventListener('pagehide',()=>{processPoints();flushSave()});document.addEventListener('visibilitychange',()=>{if(document.hidden){processPoints();flushSave()}});new ResizeObserver(resize).observe(viewport);
+function pauseGame(){processPoints();if(activeStroke.length||strokeEnd)finishStroke();releasePointers();flushSave();}
+window.addEventListener('pagehide',pauseGame);document.addEventListener('visibilitychange',()=>{if(document.hidden)pauseGame()});new ResizeObserver(resize).observe(viewport);
 // Read-only diagnostics are also useful for browser regression tests.
-window.GemGarden={getState:()=>({current,layout:layouts[current]?.id,items:items.map(s=>({...s})),filled:[...filled],types:types.map(t=>({...t})),selected,zoom,focusId,pan:{...pan},renderer:'canvas-cache',pendingPoints:points.length,undoCount:history.length})};
+window.GemGarden={getState:()=>({current,layout:layouts[current]?.id,items:items.map(s=>({...s})),filled:[...filled],types:types.map(t=>({...t})),selected,zoom,focusId,pan:{...pan},renderer:'canvas-cache',pendingPoints:points.length,undoCount:history.length,activePointers:pointers.size})};
 (async()=>{
   try{
     data=window.GEM_GEOMETRY||await fetch('assets/geometry.json').then(r=>{if(!r.ok)throw Error('Geometry unavailable');return r.json()});layouts=data.layouts.map(layout=>{

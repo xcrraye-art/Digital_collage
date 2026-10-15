@@ -73,3 +73,8 @@
  #palette{width:100%;flex-shrink:1;min-height:0}
  #palette-help{font-size:8px;text-align:center;letter-spacing:0;flex-shrink:0}
 }
+.art-frame{position:relative}
+.art-status{position:absolute;right:7px;top:5px;font-size:9px;letter-spacing:1px;color:#9c8b95;background:#ffffffed;padding:3px 5px;z-index:1}
+.in-progress .art-status{color:#ae6286}.art-card.in-progress{border-color:#dcc2cf}
+.card-progress{position:absolute;left:8px;right:8px;bottom:5px;height:2px;background:#f1e9ed}
+.card-progress i{display:block;height:100%;background:#c68fa9}
