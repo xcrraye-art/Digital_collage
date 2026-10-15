@@ -21,27 +21,36 @@ const path=require('node:path');
   assert.equal(await page.locator('#viewport').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(255, 255, 255)');
   await clickGem(page,0);await waitFilled(page,1);
   const wrong=(await state(page)).items.findIndex(s=>s.c!==0);await clickGem(page,wrong);assert.equal((await state(page)).filled.length,1);
+  // A different cut of the same material must be a different numbered type.
+  let initial=await state(page),round=initial.items.findIndex(s=>s.c===initial.items[0].c&&s.shape!==initial.items[0].shape);
+  assert.ok(round>=0);assert.notEqual(initial.items[round].type,initial.items[0].type);
+  await clickGem(page,round);assert.equal((await state(page)).filled.length,1,'Same color with wrong shape is rejected');
+  assert.match(await page.locator('#toast').textContent(),/圆形/);
+  const roundType=initial.items[round].type;await page.locator(`[data-type="${roundType}"]`).click();await clickGem(page,round);await waitFilled(page,2);
+  await page.locator('#undo').click();await waitFilled(page,1);await page.locator('[data-type="0"]').click();
+
   await page.locator('#undo').click();await waitFilled(page,0);await clickGem(page,0);await waitFilled(page,1);
   await page.reload();await page.locator('[data-art="0"]').click();await waitFilled(page,1);
   assert.equal(await page.evaluate(()=>localStorage.getItem('gem-garden-0')),'[0,16]','Legacy save is retained');
   await page.locator('[data-mode="paint"]').click();const a=await screen(page,1),c=await screen(page,2);
   await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(c.x,c.y,{steps:20});await page.mouse.up();
   await page.waitForFunction(()=>GemGarden.getState().filled.length>=3);
-  for(let color=0;color<4;color++){
-   await page.locator(`[data-color="${color}"]`).click();
-   await page.waitForFunction(c=>GemGarden.getState().selected===c,color);
-   let s=await state(page);for(let id=0;id<s.items.length;id++)if(s.items[id].c===color&&!s.filled.includes(id))await clickGem(page,id);
+  await page.locator('#undo').click();await waitFilled(page,1);assert.equal((await state(page)).selected,0,'Undo restores the stroke type');
+  for(let type=0;type<(await state(page)).types.length;type++){
+   await page.locator(`[data-type="${type}"]`).click();
+   await page.waitForFunction(c=>GemGarden.getState().selected===c,type);
+   let s=await state(page);for(let id=0;id<s.items.length;id++)if(s.items[id].type===type&&!s.filled.includes(id))await clickGem(page,id);
   }
   await waitFilled(page,140);assert.equal(await page.locator('#complete').isVisible(),true);assert.equal(await page.locator('#percent').textContent(),'100%');
   await page.locator('#continue').click();await page.locator('#plus').click();assert.equal(await page.locator('#complete').isVisible(),false,'Zoom does not reopen completion');
   await page.locator('#back').click();assert.match(await page.locator('[data-art="0"] em').textContent(),/100%/);
   await page.locator('[data-art="3"]').click();assert.equal((await state(page)).items.length,210);
-  assert.ok((await state(page)).items.some(s=>s.shape==='heart'));
+  assert.ok((await state(page)).items.some(s=>s.shape==='heart'));assert.equal((await state(page)).types.length,11);assert.equal(await page.locator('[data-type]').count(),11);
   await page.locator('#plus').click();await page.waitForFunction(()=>GemGarden.getState().zoom===1.4);
   await page.locator('[data-mode="pan"]').click();await page.mouse.move(700,550);await page.mouse.down();await page.mouse.move(750,580);await page.mouse.up();assert.equal((await state(page)).pan.x,50);
   // High zoom uses individual cached sprites, preserving hit geometry.
   await page.locator('#fit').click();await page.locator('#plus').click();await page.locator('#plus').click();await page.locator('#plus').click();await page.waitForFunction(()=>GemGarden.getState().zoom>1.8);
-  await page.locator('[data-mode="tap"]').click();let high=(await state(page));let central=high.items.findIndex(s=>Math.abs(s.x-400)<65&&Math.abs(s.y-400)<65);await page.locator(`[data-color="${high.items[central].c}"]`).click();await clickGem(page,central);await waitFilled(page,1);
+  await page.locator('[data-mode="tap"]').click();let high=(await state(page));let central=high.items.findIndex(s=>Math.abs(s.x-400)<65&&Math.abs(s.y-400)<65);await page.locator(`[data-type="${high.items[central].type}"]`).click();await clickGem(page,central);await waitFilled(page,1);
   await page.locator('#fit').click();await page.waitForFunction(()=>GemGarden.getState().zoom===1);
   await page.locator('#back').click();await page.locator('[data-art="2"]').click();assert.equal((await state(page)).items.length,175);await clickGem(page,0);await waitFilled(page,1);
   // Reset clears paint and resets progress without discarding the legacy save.
@@ -70,12 +79,19 @@ const path=require('node:path');
   assert.ok((await state(mobile)).zoom>2);assert.equal((await state(mobile)).filled.length,1,'Pinch does not place gems');
   await mobile.locator('#fit').tap();await mobile.locator('#back').tap();await mobile.locator('[data-art="3"]').tap();assert.ok(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   assert.equal(await mobile.locator('#canvas').evaluate(c=>c.width),780,'Canvas respects mobile pixel density');
+  // Long-press a heart to sample the exact cut and color without placing it.
+  let birds=await state(mobile),heart=birds.items.findIndex(s=>s.shape==='heart'),at=await screen(mobile,heart);
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...at,id:8}]});await mobile.waitForTimeout(600);await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await mobile.waitForFunction(t=>GemGarden.getState().selected===t,birds.items[heart].type);assert.equal((await state(mobile)).filled.length,0,'Long press samples without placing');
+  const paletteRect=await mobile.locator('#palette').boundingBox(),active=await mobile.locator(`[data-type="${birds.items[heart].type}"]`).boundingBox();assert.ok(active.x>=paletteRect.x-1&&active.x+active.width<=paletteRect.x+paletteRect.width+1,'Sampled type scrolled into view');
+  const locateBefore=(await state(mobile)).filled.length;await mobile.locator('#find').tap();const exact=await state(mobile);assert.equal(exact.items[exact.focusId].type,exact.selected,'Locator matches shape and color');await mobile.locator('#fit').tap();
+
   await mobile.setViewportSize({width:844,height:390});await mobile.waitForTimeout(150);
   assert.ok(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   for(const id of ['canvas','find','fit','plus','back']){const r=await mobile.locator('#'+id).boundingBox();assert.ok(r.y>=0&&r.y+r.height<=391,`${id} fits landscape viewport`)}
   await mobile.locator('#find').tap();const landscape=await state(mobile);assert.ok(landscape.focusId>=0);await clickGem(mobile,landscape.focusId,true);await waitFilled(mobile,1);
 
   assert.deepEqual(errors,[]);
-  console.log('PASS: target locator, remaining counts, anchored wheel zoom, touch swipe protection; all four layouts, cached renderer, precise hit testing, wrong-color rejection, undo, new/legacy saves, drag paint, completion, pan/zoom, standalone assets, mobile tap/pinch, DPR and no horizontal overflow.');
+  console.log('PASS: separate color/cut types, wrong-shape rejection, 11-type palette, long-press sampling, exact-type locator; target locator, remaining counts, anchored wheel zoom, touch swipe protection; all four layouts, cached renderer, precise hit testing, wrong-color rejection, undo, new/legacy saves, drag paint, completion, pan/zoom, standalone assets, mobile tap/pinch, DPR and no horizontal overflow.');
  }finally{if(browser)await browser.close();server.kill()}
 })().catch(e=>{console.error(e);process.exitCode=1});

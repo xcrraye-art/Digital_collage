@@ -60,3 +60,16 @@
  .canvas-bottom{left:12px;right:12px;bottom:7px}.canvas-actions button{min-height:32px;padding:5px 10px}
  .canvas-bottom>span{font-size:9px}.modes button,.tools button{min-height:36px}
 }
+#palette{min-width:0;width:max-content;max-width:100%;scroll-padding:8px}
+.gem-choice{flex:0 0 auto}
+#palette-help{font-size:9px;color:#aaa0a6;letter-spacing:1px;line-height:1.4}
+.game-screen .studio{height:calc(100dvh - 64px);display:flex;flex-direction:column}
+.studio-head,.progress-track,.palette-wrap,.toolbar{flex-shrink:0}
+.game-screen .canvas-wrap{height:auto;min-height:200px;flex:1}
+@media(orientation:landscape) and (max-height:550px){
+ .game-screen .studio{display:grid;height:calc(100dvh - 44px)}
+ .game-screen .canvas-wrap{height:auto;min-height:0}
+ .palette-wrap{flex-shrink:1}.palette-label{max-width:100%;text-align:center}
+ #palette{width:100%;flex-shrink:1;min-height:0}
+ #palette-help{font-size:8px;text-align:center;letter-spacing:0;flex-shrink:0}
+}
